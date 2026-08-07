@@ -25,9 +25,9 @@ Add the aggregate component to the application's component manifest:
 
 ```yaml
 dependencies:
-  dragon-core:
+  dragon_core:
     git: https://github.com/justinh-rahb/dragon-core.git
-    path: .
+    path: components/dragon_core
     version: <tag-or-commit>
 ```
 
@@ -39,8 +39,8 @@ For local development in a sibling checkout, use a path dependency temporarily:
 
 ```yaml
 dependencies:
-  dragon-core:
-    path: ../../dragon-core
+  dragon_core:
+    path: ../../dragon-core/components/dragon_core
 ```
 
 ## Compatibility

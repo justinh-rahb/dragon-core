@@ -1,5 +1,5 @@
 # Aggregate ESP-IDF component for the Dragon firmware family.
-# Consumers add dragon-core once; the manifest resolves the sibling dc_* components.
+# Consumers add dragon_core once; the manifest resolves the sibling dc_* components.
 idf_component_register(
     REQUIRES
         dc_evlog
