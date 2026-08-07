@@ -7,12 +7,19 @@
 #include "esp_err.h"
 #include <stdint.h>
 
+// NOTE: values are persisted in NVS — APPEND new sources, never renumber existing
+// ones (DC_SRC_NONE stays 3 so already-unbound devices don't silently rebind).
 typedef enum {
-    DC_SRC_KLIPPER = 0,   // Moonraker WebSocket — default, the real target
-    DC_SRC_BAMBU   = 1,   // Bambu LAN MQTT bed-follow (read-only)
-    DC_SRC_HA      = 2,   // Home Assistant MQTT — HA is the controller
-    DC_SRC_NONE    = 3,   // unbound — no external controller (web/manual only)
+    DC_SRC_KLIPPER      = 0,   // Moonraker WebSocket — default, the real target
+    DC_SRC_BAMBU        = 1,   // Bambu LAN MQTT bed-follow (read-only)
+    DC_SRC_HA           = 2,   // Home Assistant MQTT — HA is the controller
+    DC_SRC_NONE         = 3,   // unbound — no external controller (web/manual only)
+    DC_SRC_KLIPPER_MQTT = 4,   // Klipper via MQTT (Moonraker broker) — controller
 } dc_ctl_source_t;
+
+// Highest valid enum value — use for range-clamping persisted values (NOT
+// DC_SRC_NONE, which is no longer the last entry).
+#define DC_SRC_MAX DC_SRC_KLIPPER_MQTT
 
 // Persisted control source. Returns DC_SRC_KLIPPER if unset or out of range
 // (fail-safe to the shipped path).
