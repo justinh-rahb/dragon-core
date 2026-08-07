@@ -1,0 +1,4 @@
+dependencies:
+  espressif/esp_websocket_client: "^1.3.0"
+  dc_evlog:
+    override_path: ../dc_evlog
