@@ -1,0 +1,5 @@
+version: "0.1.0"
+description: Persisted external control-source selection for Dragon firmware
+license: MIT
+dependencies:
+  idf: ">=5.3"

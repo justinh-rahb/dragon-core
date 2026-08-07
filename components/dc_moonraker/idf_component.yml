@@ -1,4 +1,8 @@
+version: "0.1.0"
+description: Moonraker WebSocket client and Klipper status for Dragon firmware
+license: MIT
 dependencies:
+  idf: ">=5.3"
   espressif/esp_websocket_client: "^1.3.0"
   dc_evlog:
     override_path: ../dc_evlog
