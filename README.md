@@ -21,26 +21,52 @@ DragonBreath hardware coupling is removed behind golden API-response tests.
 
 ## Consuming from an ESP-IDF application
 
-Add the aggregate component to the application's component manifest:
+Add the components used by the application to its component manifest. Pin every
+component to the same tag or full commit SHA:
 
 ```yaml
 dependencies:
-  dragon_core:
+  dc_evlog:
     git: https://github.com/justinh-rahb/dragon-core.git
-    path: components/dragon_core
+    path: components/dc_evlog
+    version: <tag-or-commit>
+  dc_source:
+    git: https://github.com/justinh-rahb/dragon-core.git
+    path: components/dc_source
+    version: <tag-or-commit>
+  dc_bambu:
+    git: https://github.com/justinh-rahb/dragon-core.git
+    path: components/dc_bambu
+    version: <tag-or-commit>
+  dc_wifi:
+    git: https://github.com/justinh-rahb/dragon-core.git
+    path: components/dc_wifi
+    version: <tag-or-commit>
+  dc_moonraker:
+    git: https://github.com/justinh-rahb/dragon-core.git
+    path: components/dc_moonraker
     version: <tag-or-commit>
 ```
 
-The aggregate manifest resolves the sibling `dc_*` components from the same revision.
 Applications should commit `dependencies.lock` when consuming tagged or commit-pinned
-revisions.
+revisions. Listing the components directly is intentional: the Component Manager
+bundled with ESP-IDF 5.3 downloads only the selected Git subdirectory, so an aggregate
+component cannot resolve sibling directories with `override_path`.
 
 For local development in a sibling checkout, use a path dependency temporarily:
 
 ```yaml
 dependencies:
-  dragon_core:
-    path: ../../dragon-core/components/dragon_core
+  dc_evlog:
+    path: ../../dragon-core/components/dc_evlog
+  dc_source:
+    path: ../../dragon-core/components/dc_source
+  dc_bambu:
+    path: ../../dragon-core/components/dc_bambu
+  dc_wifi:
+    path: ../../dragon-core/components/dc_wifi
+  dc_moonraker:
+    path: ../../dragon-core/components/dc_moonraker
 ```
 
 ## Compatibility
