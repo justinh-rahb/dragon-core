@@ -1,0 +1,5 @@
+version: "0.1.0"
+description: Embedded capability-aware browser SPA for Dragon-family firmware
+license: MIT
+dependencies:
+  idf: ">=5.3"

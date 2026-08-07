@@ -21,6 +21,9 @@ jobs:
       - name: Run Bambu parser tests
         run: tests/run_bambu_host_test.sh
 
+      - name: Check family SPA syntax and capability contract
+        run: node tests/check_ui.mjs
+
       - name: Reject whitespace errors
         run: git diff --check
 

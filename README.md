@@ -13,11 +13,14 @@ Product repositories own GPIO mappings, sensors, actuators, safety policy, and t
 | `dc_bambu` | Bambu LAN MQTT client and printer status |
 | `dc_wifi` | Station/AP networking, provisioning state, scanning, and mDNS |
 | `dc_moonraker` | Moonraker WebSocket client and Klipper print status |
+| `dc_ui` | Embedded, capability-aware browser SPA shared by Dragon products |
 
-The first extraction deliberately starts with components already proven in
-DragonBreath and free of board/sensor/actuator dependencies. HTTP, OTA, the portal,
-the shared SPA, and the `dc_device` capability boundary follow after their current
-DragonBreath hardware coupling is removed behind golden API-response tests.
+The initial service extraction deliberately started with components already proven in
+DragonBreath and free of board/sensor/actuator dependencies. `dc_ui` is the first web
+layer follow-on: it owns only the static family SPA asset and exposes its compressed
+bytes to a product HTTP server. HTTP, OTA, portal handlers, and the concrete
+`dc_device` boundary remain product-local until their hardware coupling is removed
+behind golden API-response tests.
 
 ## Consuming from an ESP-IDF application
 
@@ -46,6 +49,10 @@ dependencies:
     git: https://github.com/justinh-rahb/dragon-core.git
     path: components/dc_moonraker
     version: <tag-or-commit>
+  dc_ui:
+    git: https://github.com/justinh-rahb/dragon-core.git
+    path: components/dc_ui
+    version: <tag-or-commit>
 ```
 
 Applications should commit `dependencies.lock` when consuming tagged or commit-pinned
@@ -67,6 +74,8 @@ dependencies:
     path: ../../dragon-core/components/dc_wifi
   dc_moonraker:
     path: ../../dragon-core/components/dc_moonraker
+  dc_ui:
+    path: ../../dragon-core/components/dc_ui
 ```
 
 ## Compatibility
