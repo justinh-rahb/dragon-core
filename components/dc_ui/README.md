@@ -9,7 +9,7 @@ The additive family descriptor is:
 
 ```json
 {
-  "capabilities": ["power_on", "auto", "drying", "sse"],
+  "capabilities": ["power_on", "auto", "drying"],
   "ui": {
     "schema": 1,
     "product": "dragonbreath",
@@ -20,9 +20,16 @@ The additive family descriptor is:
 
 `capabilities` gates optional screens. An older firmware response without the array
 keeps every current screen visible, preserving compatibility with already-shipped
-DragonBreath API v2 implementations. Product-specific state and commands remain on
-their existing routes; this extraction does not change their wire contracts.
+DragonBreath API v2 implementations. Schema `1` is the current family descriptor;
+an unknown schema is ignored so the static product identity and complete UI remain
+available.
 
-The current live transport is HTTP plus SSE (`/api/v2/state` and
-`/api/v2/events`). Multi-device discovery/grouping and any future WebSocket transport
-are separate follow-ons.
+Although route handlers stay product-local, the shared client owns the browser side
+of the Dragon API v2 wire contract. A consumer must provide `/api/v2/info`,
+`/api/v2/state`, `/api/v2/events`, and the command/settings routes used by the SPA,
+or provide a compatible adapter. The client attempts SSE for live updates and falls
+back to serialized polling. Multi-device discovery/grouping and any future WebSocket
+transport are separate follow-ons.
+
+Consuming builds require a host `gzip`; CMake uses `gzip -9 -n` to generate the
+reproducible embedded asset.

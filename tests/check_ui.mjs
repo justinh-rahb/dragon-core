@@ -28,6 +28,8 @@ for (const marker of [
   'data-capability="auto"',
   'data-capability="drying"',
   "function applyDeviceInfo(i)",
+  "if(ui.schema!=null && ui.schema!==1) return",
+  "(title&&title.textContent)||document.title",
 ]) {
   if (!html.includes(marker)) throw new Error(`missing family-SPA contract marker: ${marker}`);
 }

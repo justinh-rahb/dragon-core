@@ -53,7 +53,6 @@ body{
   place-items: center;
 }
 [hidden]{ display: none !important; }
-[hidden]{ display: none !important; }
 
 /* ---- Controls (btn / form-range / form-select), from the prototype token kit ---- */
 .btn{
@@ -847,7 +846,11 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
   function applyDeviceInfo(i){
     if(!i) return;
     var ui=i.ui||{};
-    var name=ui.display_name||i.display_name||'Dragon';
+    /* An absent schema is the pre-descriptor compatibility case. An unknown
+       schema must not reinterpret identity or hide product surfaces. */
+    if(ui.schema!=null && ui.schema!==1) return;
+    var title=$('dc-product-title');
+    var name=ui.display_name||i.display_name||(title&&title.textContent)||document.title;
     document.title=name;
     u('dc-product-title', name);
     if(!Array.isArray(i.capabilities)) return;
