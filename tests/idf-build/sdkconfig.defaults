@@ -1,0 +1,6 @@
+CONFIG_IDF_TARGET="esp32c3"
+
+# Bambu printers use per-device self-signed certificates. Product firmware
+# enables this mode so the compile fixture should exercise the same TLS shape.
+CONFIG_ESP_TLS_INSECURE=y
+CONFIG_ESP_TLS_SKIP_SERVER_CERT_VERIFY=y
