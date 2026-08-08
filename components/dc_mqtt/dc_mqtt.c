@@ -86,14 +86,19 @@ esp_err_t dc_mqtt_start(const dc_mqtt_config_t *config, dc_mqtt_client_t **out_c
 
     esp_err_t err = esp_mqtt_client_register_event(
         client->handle, ESP_EVENT_ANY_ID, mqtt_event_handler, client);
-    if (err == ESP_OK) err = esp_mqtt_client_start(client->handle);
+    if (err == ESP_OK) {
+        // Publish the wrapper to the caller before the MQTT task can issue a fast
+        // CONNECTED callback. Product callbacks commonly publish/subscribe through
+        // their stored client pointer, matching the ordering of raw ESP-MQTT setup.
+        *out_client = client;
+        err = esp_mqtt_client_start(client->handle);
+    }
     if (err != ESP_OK) {
+        *out_client = NULL;
         esp_mqtt_client_destroy(client->handle);
         free(client);
         return err;
     }
-
-    *out_client = client;
     return ESP_OK;
 }
 
