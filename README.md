@@ -13,6 +13,7 @@ Product repositories own GPIO mappings, sensors, actuators, safety policy, and t
 | `dc_bambu` | Bambu LAN MQTT client and printer status |
 | `dc_wifi` | Station/AP networking, provisioning state, scanning, and mDNS |
 | `dc_moonraker` | Moonraker WebSocket client and Klipper print status |
+| `dc_mqtt` | Shared ESP-MQTT session lifecycle, LWT, and event callbacks |
 | `dc_ui` | Embedded, capability-aware browser SPA shared by Dragon products |
 
 The initial service extraction deliberately started with components already proven in
@@ -49,6 +50,10 @@ dependencies:
     git: https://github.com/justinh-rahb/dragon-core.git
     path: components/dc_moonraker
     version: <tag-or-commit>
+  dc_mqtt:
+    git: https://github.com/justinh-rahb/dragon-core.git
+    path: components/dc_mqtt
+    version: <tag-or-commit>
   dc_ui:
     git: https://github.com/justinh-rahb/dragon-core.git
     path: components/dc_ui
@@ -74,6 +79,8 @@ dependencies:
     path: ../../dragon-core/components/dc_wifi
   dc_moonraker:
     path: ../../dragon-core/components/dc_moonraker
+  dc_mqtt:
+    path: ../../dragon-core/components/dc_mqtt
   dc_ui:
     path: ../../dragon-core/components/dc_ui
 ```
