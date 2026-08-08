@@ -99,6 +99,11 @@ erase saved Wi-Fi, Moonraker, Bambu, or control-source configuration.
 
 Requires ESP-IDF 5.3 or newer.
 
+For local and CI builds, use `tools/idf-build.sh <project> <target> <build-dir>`.
+It explicitly locates the Xtensa/RISC-V compiler required by the target and rejects
+stale Component Manager locks before CMake can quietly reuse a different pinned
+core revision.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).

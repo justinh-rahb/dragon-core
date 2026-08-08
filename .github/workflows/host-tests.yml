@@ -41,4 +41,5 @@ jobs:
         with:
           esp_idf_version: v5.3
           target: esp32c3
-          path: tests/idf-build
+          path: .
+          command: tools/idf-build.sh tests/idf-build esp32c3 build
