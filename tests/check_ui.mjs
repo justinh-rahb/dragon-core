@@ -37,6 +37,10 @@ for (const marker of [
   "function applyVent(s)",
   "ventPost('/api/v2/settings'",
   "ventCommand('manual'",
+  'id="dc-provisioning"',
+  "function loadProvisioning()",
+  "'/api/v1/provisioning/product'",
+  "'/api/v1/system/update'",
 ]) {
   if (!html.includes(marker)) throw new Error(`missing family-SPA contract marker: ${marker}`);
 }

@@ -2,6 +2,7 @@
 #include "dc_evlog.h"
 #include "dc_moonraker.h"
 #include "dc_mqtt.h"
+#include "dc_portal.h"
 #include "dc_source.h"
 #include "dc_ui.h"
 #include "dc_wifi.h"
@@ -17,4 +18,6 @@ void app_main(void)
     (void)dc_mqtt_start(&mqtt_config, &mqtt);
     (void)dc_mqtt_destroy(mqtt);
     (void)dc_ui_spa_asset();
+    (void)dc_portal_start(NULL);
+    (void)dc_portal_httpd();
 }
