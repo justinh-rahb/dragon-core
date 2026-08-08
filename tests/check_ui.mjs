@@ -30,6 +30,13 @@ for (const marker of [
   "function applyDeviceInfo(i)",
   "if(ui.schema!=null && ui.schema!==1) return",
   "(title&&title.textContent)||document.title",
+  'ui.product===\'dragonvent\'',
+  'id="dv-app"',
+  'data-vent-content="manual"',
+  'data-vent-content="auto"',
+  "function applyVent(s)",
+  "ventPost('/api/v2/settings'",
+  "ventCommand('manual'",
 ]) {
   if (!html.includes(marker)) throw new Error(`missing family-SPA contract marker: ${marker}`);
 }

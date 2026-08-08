@@ -396,6 +396,78 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
 .zones-add{ display: flex; gap: 8px; align-items: center; margin-top: 12px; }
 .zones-add .zone-in-name{ width: auto; flex: 1; text-align: left; }
 .zones-empty{ color: var(--muted-foreground); font-size: 13px; margin-top: 10px; }
+/* ---- DragonVent product surface. The shared shell and tokens stay familiar,
+   while the green/teal accent and airflow diagram make this a vent controller,
+   not a heater UI wearing a different name. Kept in a separate DOM subtree so
+   DragonBreath's established IDs and behavior remain compatibility-stable. ---- */
+.vent-app{
+  --primary: light-dark(rgb(14 148 136), rgb(94 234 212));
+  --ring: light-dark(rgb(13 148 136), rgb(94 234 212 / 76%));
+  --viz-series-1: var(--primary);
+  --viz-series-2: light-dark(rgb(34 197 94), rgb(74 222 128));
+}
+.vent-main{ min-width:0; min-height:0; overflow:hidden; padding:12px;
+  display:flex; flex-direction:column; }
+.vent-tab[data-vent-page="settings"]{ margin-top:auto; }
+.vent-view{ display:none; flex:1; min-height:0; overflow:auto; }
+.vent-main[data-vent-page="home"] [data-vent-content="home"],
+.vent-main[data-vent-page="manual"] [data-vent-content="manual"],
+.vent-main[data-vent-page="auto"] [data-vent-content="auto"],
+.vent-main[data-vent-page="settings"] [data-vent-content="settings"]{ display:flex; }
+.vent-home{ flex-direction:column; gap:9px; overflow:auto; }
+.vent-grid{ min-height:0; display:grid; grid-template-columns:minmax(0,1.15fr) minmax(190px,.85fr);
+  grid-template-rows:minmax(180px,1fr) auto; gap:9px; }
+.vent-hero{ display:flex; align-items:center; gap:18px; }
+.vent-visual{ position:relative; width:min(38%,150px); min-width:105px; aspect-ratio:1;
+  display:grid; place-items:center; border-radius:50%;
+  background:radial-gradient(circle, color-mix(in srgb,var(--primary) 18%,transparent) 0 45%, transparent 46%);
+  border:1px solid color-mix(in srgb,var(--primary) 30%,var(--border)); }
+.vent-ring{ position:absolute; inset:12%; border:7px solid color-mix(in srgb,var(--foreground) 10%,transparent);
+  border-top-color:var(--primary); border-right-color:var(--primary); border-radius:50%;
+  transform:rotate(-45deg); transition:transform .35s ease, border-color .35s ease; }
+.vent-app[data-vent-target="closed"] .vent-ring{ transform:rotate(135deg);
+  border-top-color:var(--muted-foreground); border-right-color:var(--muted-foreground); }
+.vent-app[data-vent-running="1"] .vent-ring{ animation:vent-spin 1.2s linear infinite; }
+@keyframes vent-spin{ to{ transform:rotate(315deg); } }
+.vent-mark{ position:relative; z-index:1; text-align:center; }
+.vent-mark strong{ display:block; font-size:22px; letter-spacing:.03em; }
+.vent-mark span{ color:var(--muted-foreground); font-size:10px; text-transform:uppercase; }
+.vent-copy{ min-width:0; }
+.vent-copy h2{ margin:0 0 5px; font-size:28px; line-height:1; }
+.vent-copy p{ margin:0; color:var(--muted-foreground); font-size:12px; }
+.vent-chip{ display:inline-flex; align-items:center; gap:5px; margin-top:12px; padding:4px 8px;
+  border-radius:var(--radius-full); color:var(--primary);
+  background:color-mix(in srgb,var(--primary) 12%,transparent); font-size:11px; font-weight:600; }
+.vent-chip::before{ content:""; width:7px; height:7px; border-radius:50%; background:currentColor; }
+.vent-actions{ grid-column:1/-1; display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+.vent-actions .btn{ min-height:42px; gap:6px; }
+.vent-status{ display:flex; flex-direction:column; gap:8px; }
+.vent-status .status-detail{ margin-top:0; }
+.vent-mode-page{ flex-direction:column; gap:12px; max-width:540px; width:100%; }
+.vent-choice{ display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+.vent-choice .btn{ min-height:68px; flex-direction:column; gap:3px; }
+.vent-choice .btn strong{ font-size:16px; }
+.vent-choice .btn small{ color:var(--muted-foreground); }
+.vent-thresholds{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.vent-threshold{ padding:12px; border:1px solid var(--border); border-radius:5px; background:var(--card); }
+.vent-threshold label{ display:block; color:var(--muted-foreground); font-size:11px;
+  font-weight:600; text-transform:uppercase; }
+.vent-threshold .touch-value{ margin:10px 0 5px; font-size:27px; }
+.vent-settings{ flex-direction:column; gap:12px; max-width:560px; width:100%; }
+@container (max-width:620px){
+  .vent-grid{ grid-template-columns:1fr; grid-template-rows:auto auto auto; }
+  .vent-actions{ grid-column:1; }
+  .vent-hero{ min-height:142px; }
+}
+@container (max-width:410px){
+  .vent-main{ padding:8px; }
+  .vent-grid{ gap:7px; }
+  .vent-hero{ gap:10px; padding:9px; }
+  .vent-visual{ min-width:88px; }
+  .vent-copy h2{ font-size:23px; }
+  .vent-actions .btn{ min-height:38px; padding:0 5px; font-size:12px; }
+  .vent-thresholds{ grid-template-columns:1fr; }
+}
 </style>
 </head>
 <body>
@@ -419,6 +491,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
   <symbol id="i-alert" viewBox="0 0 24 24"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></symbol>
   <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M5 21h14"/></symbol>
   <symbol id="i-wifi" viewBox="0 0 24 24"><path d="M5 12.5a10 10 0 0 1 14 0"/><path d="M8.5 16a5 5 0 0 1 7 0"/><path d="M12 20h.01"/></symbol>
+  <symbol id="i-vent" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 3c2.8 2.8 3.3 5.1 1.5 7.1M21 12c-2.8 2.8-5.1 3.3-7.1 1.5M12 21c-2.8-2.8-3.3-5.1-1.5-7.1M3 12c2.8-2.8 5.1-3.3 7.1-1.5"/><circle cx="12" cy="12" r="1.5"/></symbol>
 </svg>
 
 <div class="app" data-state="off" data-online="0">
@@ -834,9 +907,118 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
   </div>
 </div>
 
+<div class="app vent-app" id="dv-app" data-online="0" data-vent-target="closed" data-vent-running="0" hidden>
+  <div class="shell">
+    <nav class="rail" aria-label="DragonVent navigation">
+      <div class="connection" aria-label="Connection"><i class="dot"></i><span id="dv-conn">Connecting…</span></div>
+      <button class="tab vent-tab" type="button" data-vent-page="home" aria-selected="true" aria-label="Dashboard"><svg class="icon"><use href="#i-house"/></svg></button>
+      <button class="tab vent-tab" type="button" data-vent-page="manual" aria-selected="false" aria-label="Manual vent control"><svg class="icon"><use href="#i-vent"/></svg></button>
+      <button class="tab vent-tab" type="button" data-vent-page="auto" aria-selected="false" aria-label="Automatic vent policy"><svg class="icon"><use href="#i-refresh"/></svg></button>
+      <button class="tab vent-tab" type="button" data-vent-page="settings" aria-selected="false" aria-label="Settings"><svg class="icon"><use href="#i-settings"/></svg></button>
+    </nav>
+
+    <main class="vent-main" id="dv-main" data-vent-page="home">
+      <section class="vent-view vent-home" data-vent-content="home">
+        <div class="vent-grid">
+          <article class="card vent-hero">
+            <div class="vent-visual" aria-hidden="true">
+              <div class="vent-ring"></div>
+              <div class="vent-mark"><strong id="dv-position">--</strong><span>vent</span></div>
+            </div>
+            <div class="vent-copy">
+              <h2 id="dv-headline">DragonVent</h2>
+              <p id="dv-summary">Connecting to the vent controller…</p>
+              <span class="vent-chip" id="dv-mode-chip">-- mode</span>
+            </div>
+          </article>
+
+          <article class="card vent-status">
+            <h3>Printer &amp; controller</h3>
+            <dl class="status-detail">
+              <div><dt>Source</dt><dd id="dv-source">--</dd></div>
+              <div><dt>Link</dt><dd id="dv-link">--</dd></div>
+              <div><dt>Printer</dt><dd id="dv-printer">--</dd></div>
+              <div><dt>Bed</dt><dd id="dv-bed">--</dd></div>
+              <div><dt>Material</dt><dd id="dv-material">--</dd></div>
+              <div><dt>Motor groups</dt><dd id="dv-groups">--</dd></div>
+            </dl>
+          </article>
+
+          <div class="vent-actions" aria-label="Quick vent actions">
+            <button class="btn" type="button" id="dv-open"><svg class="icon"><use href="#i-wind"/></svg> Open</button>
+            <button class="btn" type="button" id="dv-close"><svg class="icon"><use href="#i-square"/></svg> Close</button>
+            <button class="btn btn-primary" type="button" id="dv-auto"><svg class="icon"><use href="#i-refresh"/></svg> Auto</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="vent-view vent-mode-page" data-vent-content="manual">
+        <div>
+          <h3>Manual vent control</h3>
+          <p class="set-note">Take direct control of every detected vent group. Automatic printer-following pauses until Auto is selected again.</p>
+        </div>
+        <div class="vent-choice">
+          <button class="btn" type="button" id="dv-manual-open"><svg class="icon"><use href="#i-wind"/></svg><strong>Open</strong><small>Max airflow</small></button>
+          <button class="btn" type="button" id="dv-manual-close"><svg class="icon"><use href="#i-square"/></svg><strong>Close</strong><small>Seal chamber</small></button>
+        </div>
+        <div class="mode-feedback" id="dv-manual-msg" role="status" aria-live="polite"></div>
+      </section>
+
+      <section class="vent-view vent-mode-page" data-vent-content="auto">
+        <div>
+          <h3>Automatic policy</h3>
+          <p class="set-note">Open while printing or when the bed is hot. Close after the printer is idle and the bed cools below the lower threshold.</p>
+        </div>
+        <div class="vent-thresholds">
+          <div class="vent-threshold">
+            <label for="dv-open-range">Open at</label>
+            <output class="touch-value" id="dv-open-value">45 <span>°C</span></output>
+            <input class="form-range" id="dv-open-range" type="range" min="20" max="100" step="1" value="45">
+          </div>
+          <div class="vent-threshold">
+            <label for="dv-close-range">Close below</label>
+            <output class="touch-value" id="dv-close-value">35 <span>°C</span></output>
+            <input class="form-range" id="dv-close-range" type="range" min="10" max="90" step="1" value="35">
+          </div>
+        </div>
+        <button class="btn btn-primary btn-block" type="button" id="dv-auto-save"><svg class="icon"><use href="#i-refresh"/></svg> Save &amp; enable Auto</button>
+        <div class="mode-feedback" id="dv-auto-msg" role="status" aria-live="polite"></div>
+      </section>
+
+      <section class="vent-view vent-settings" data-vent-content="settings">
+        <article class="set-card">
+          <h3>Device</h3>
+          <dl class="set-info">
+            <div><dt>Firmware</dt><dd id="dv-version">--</dd></div>
+            <div><dt>Device ID</dt><dd id="dv-device-id">--</dd></div>
+            <div><dt>Wi-Fi</dt><dd id="dv-wifi">--</dd></div>
+          </dl>
+        </article>
+        <article class="set-card">
+          <h3>Network &amp; printer source</h3>
+          <p class="set-note">Wi-Fi credentials, Moonraker or Bambu connection, fallback AP, firmware update, logs and factory reset remain available in the recovery-safe setup page.</p>
+          <a class="btn btn-primary btn-block" href="/setup"><svg class="icon"><use href="#i-settings"/></svg> Open device setup</a>
+        </article>
+        <article class="set-card">
+          <h3>Appearance</h3>
+          <div class="theme-seg">
+            <button class="btn btn-sm" type="button" data-theme-set="auto" aria-pressed="true">System</button>
+            <button class="btn btn-sm" type="button" data-theme-set="light" aria-pressed="false">Light</button>
+            <button class="btn btn-sm" type="button" data-theme-set="dark" aria-pressed="false">Dark</button>
+          </div>
+        </article>
+      </section>
+
+      <div class="app-version">DragonVent <span id="dv-footer-version">—</span></div>
+    </main>
+  </div>
+</div>
+
 <script>
 (function(){
   var app = document.querySelector('.app');
+  var ventApp = document.getElementById('dv-app');
+  var product = 'dragonbreath';
   var $ = function(id){ return document.getElementById(id); };
   function u(id, v){ var e=$(id); if(e) e.textContent = v; }
   function deg(v){ return v==null ? '--' : Number(v).toFixed(1)+'°C'; }
@@ -849,6 +1031,17 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     /* An absent schema is the pre-descriptor compatibility case. An unknown
        schema must not reinterpret identity or hide product surfaces. */
     if(ui.schema!=null && ui.schema!==1) return;
+    if(ui.product==='dragonvent'){
+      product='dragonvent';
+      app.hidden=true;
+      ventApp.hidden=false;
+      ventApp.setAttribute('data-online','0');
+      document.title=ui.display_name||'DragonVent';
+      u('dv-version', i.firmware||'--');
+      u('dv-footer-version', i.firmware||'—');
+      u('dv-device-id', i.device_id||'--');
+      return;
+    }
     var title=$('dc-product-title');
     var name=ui.display_name||i.display_name||(title&&title.textContent)||document.title;
     document.title=name;
@@ -1068,7 +1261,79 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
       .catch(function(){ zonesLoaded = false; });
   }
 
+  /* ---- DragonVent adapter. DragonVent deliberately exposes a compact state
+     shape instead of pretending its motor policy is DragonBreath heat control.
+     The family SPA selects this surface from /api/v2/info and uses polling when
+     a consumer does not advertise the optional SSE capability. ---- */
+  function ventSetConn(ok){
+    if(!ventApp) return;
+    ventApp.setAttribute('data-online', ok?'1':'0');
+    u('dv-conn', ok?'Connected':'Reconnecting…');
+  }
+  function ventActivatePage(page){
+    var tab=document.querySelector('.vent-tab[data-vent-page="'+page+'"]');
+    if(!tab) return;
+    $('dv-main').dataset.ventPage=page;
+    document.querySelectorAll('.vent-tab').forEach(function(t){
+      t.setAttribute('aria-selected', String(t===tab));
+    });
+  }
+  function ventTargetLabel(v){
+    return v==='open'?'OPEN':v==='closed'?'CLOSED':'STOPPED';
+  }
+  function applyVent(s){
+    if(!s || s.api_version!==2 || !s.vent) return;
+    if(product!=='dragonvent'){
+      applyDeviceInfo({firmware:s.firmware, device_id:s.device_id,
+        ui:{schema:1,product:'dragonvent',display_name:'DragonVent'}});
+    }
+    var v=s.vent||{}, p=s.printer||{}, pol=s.policy||{}, w=s.wifi||{};
+    var target=v.target||'stop', running=!!v.running;
+    ventApp.dataset.ventTarget=target;
+    ventApp.dataset.ventRunning=running?'1':'0';
+    u('dv-position', running?'MOVING':ventTargetLabel(target));
+    u('dv-headline', running?'Vent in motion':(target==='open'?'Airflow open':target==='closed'?'Chamber sealed':'Vent stopped'));
+    u('dv-summary', s.mode==='auto'
+      ? 'Following printer activity and bed temperature automatically.'
+      : 'Manual control is active. Select Auto to resume printer-following.');
+    u('dv-mode-chip', (s.mode||'manual').toUpperCase()+' mode');
+    u('dv-source', p.source||'standalone');
+    u('dv-link', p.connected?'connected':'not connected');
+    u('dv-printer', p.state||'unknown');
+    u('dv-bed', p.bed_temperature_c==null?'--':Number(p.bed_temperature_c).toFixed(1)+' °C');
+    u('dv-material', p.material||'--');
+    u('dv-groups', String(v.active_groups||0)+(running?' · moving':''));
+    u('dv-version', s.firmware||'--');
+    u('dv-footer-version', s.firmware||'—');
+    u('dv-wifi', (w.state||'unknown')+(w.ip?' · '+w.ip:'')+(w.rssi!=null?' · '+w.rssi+' dBm':''));
+    if(pol.bed_open_c!=null){ $('dv-open-range').value=Math.round(pol.bed_open_c); u('dv-open-value',Math.round(pol.bed_open_c)+' °C'); }
+    if(pol.bed_close_c!=null){ $('dv-close-range').value=Math.round(pol.bed_close_c); u('dv-close-value',Math.round(pol.bed_close_c)+' °C'); }
+    ['dv-open','dv-manual-open'].forEach(function(id){ var b=$(id); if(b) b.setAttribute('aria-pressed',String(s.mode==='manual'&&target==='open')); });
+    ['dv-close','dv-manual-close'].forEach(function(id){ var b=$(id); if(b) b.setAttribute('aria-pressed',String(s.mode==='manual'&&target==='closed')); });
+    $('dv-auto').setAttribute('aria-pressed',String(s.mode==='auto'));
+    ventSetConn(true);
+  }
+  function ventPost(path, body){
+    return fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(function(r){
+      return r.json().catch(function(){return {};}).then(function(j){
+        if(j.state) applyVent(j.state);
+        if(!r.ok) throw j;
+        return j;
+      });
+    });
+  }
+  function ventCommand(name,target){
+    var command={name:name};
+    if(target) command.target=target;
+    return ventPost('/api/v2/command',{api_version:2,command:command});
+  }
+  function ventFlash(id,msg,klass){
+    var e=$(id); if(!e) return;
+    e.textContent=msg||''; e.className='mode-feedback'+(klass?' '+klass:'');
+  }
+
   function apply(s){
+    if(s && s.vent){ applyVent(s); return; }
     if(!s || s.api_version!==2) return;
     if(last && s.boot_id===last.boot_id && s.state_revision<rev) return;
     if(last && s.boot_id!==last.boot_id) lease=null;   // device rebooted -> our lease is gone
@@ -1226,7 +1491,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     fetch('/api/v2/state', {cache:'no-store'})
       .then(function(r){ if(!r.ok) throw 0; return r.json(); })
       .then(function(s){ apply(s); pollDelay=2000; })
-      .catch(function(){ setConn(false); pollDelay=Math.min(10000, Math.round(pollDelay*1.6)); })
+      .catch(function(){ product==='dragonvent'?ventSetConn(false):setConn(false); pollDelay=Math.min(10000, Math.round(pollDelay*1.6)); })
       .finally(function(){ polling=false; setTimeout(poll, pollDelay+Math.random()*250); });
   }
   function events(){
@@ -1234,7 +1499,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     function ev(e){ seen=true; try{ apply(JSON.parse(e.data)); }catch(_){} }
     es.addEventListener('state', ev);
     es.addEventListener('telemetry', ev);
-    es.onerror=function(){ es.close(); setConn(false); if(!seen) poll(); else setTimeout(poll,1000); };
+    es.onerror=function(){ es.close(); product==='dragonvent'?ventSetConn(false):setConn(false); if(!seen) poll(); else setTimeout(poll,1000); };
   }
 
   /* ---- Navigation: rail tabs. Home = live Dashboard; manual/auto/dry = U2 control
@@ -1660,6 +1925,35 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     request('/api/v2/boot-inactive', {})
       .then(function(){ flash('s-maint-msg', 'Rebooting into '+what+' — reconnecting shortly.', 'is-ok'); })
       .catch(function(j){ flash('s-maint-msg', 'Refused: '+((j&&(j.message||j.error))||'error'), 'is-error'); });
+  });
+
+  /* DragonVent navigation and commands. These handlers are inert while the
+     DragonBreath subtree is active. */
+  document.querySelectorAll('.vent-tab').forEach(function(tab){
+    tab.addEventListener('click',function(){ ventActivatePage(tab.dataset.ventPage); });
+  });
+  function doVentManual(target,msgId){
+    ventFlash(msgId,'Moving vent '+target+'…');
+    ventCommand('manual',target)
+      .then(function(){ ventFlash(msgId,'Manual '+target+' selected.','is-ok'); })
+      .catch(function(j){ ventFlash(msgId,(j&&j.message)||'Command failed.','is-error'); });
+  }
+  $('dv-open').addEventListener('click',function(){ doVentManual('open','dv-manual-msg'); });
+  $('dv-close').addEventListener('click',function(){ doVentManual('closed','dv-manual-msg'); });
+  $('dv-manual-open').addEventListener('click',function(){ doVentManual('open','dv-manual-msg'); });
+  $('dv-manual-close').addEventListener('click',function(){ doVentManual('closed','dv-manual-msg'); });
+  $('dv-auto').addEventListener('click',function(){ ventCommand('auto').catch(function(){}); });
+  ['dv-open-range','dv-close-range'].forEach(function(id){
+    $(id).addEventListener('input',function(){ u(id.replace('-range','-value'),this.value+' °C'); });
+  });
+  $('dv-auto-save').addEventListener('click',function(){
+    var open=Number($('dv-open-range').value), close=Number($('dv-close-range').value);
+    if(open<=close){ ventFlash('dv-auto-msg','Open temperature must be higher than close temperature.','is-error'); return; }
+    ventFlash('dv-auto-msg','Saving policy…');
+    ventPost('/api/v2/settings',{api_version:2,bed_open_c:open,bed_close_c:close})
+      .then(function(){ return ventCommand('auto'); })
+      .then(function(){ ventFlash('dv-auto-msg','Automatic printer-following enabled.','is-ok'); })
+      .catch(function(j){ ventFlash('dv-auto-msg',(j&&j.message)||'Could not save policy.','is-error'); });
   });
 
   /* Device info -> the Maintenance panel. (The old header brand/tooltip was
