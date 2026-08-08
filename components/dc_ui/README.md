@@ -18,6 +18,26 @@ The additive family descriptor is:
 }
 ```
 
+DragonVent selects its dedicated airflow surface with an additive descriptor:
+
+```json
+{
+  "capabilities": ["vent_manual", "vent_auto", "source_status", "polling"],
+  "ui": {
+    "schema": 1,
+    "product": "dragonvent",
+    "display_name": "DragonVent"
+  }
+}
+```
+
+That surface uses the same responsive shell and appearance controls as
+DragonBreath, but has vent-specific state, manual open/close controls, and the
+automatic bed-temperature policy. It does not reinterpret vent motion as heater
+state. DragonVent consumers provide `vent`, `printer`, `policy`, and `wifi` objects
+in `/api/v2/state`, plus the compact `/api/v2/command` and `/api/v2/settings`
+adapters documented by their product firmware.
+
 `capabilities` gates optional screens. An older firmware response without the array
 keeps every current screen visible, preserving compatibility with already-shipped
 DragonBreath API v2 implementations. Schema `1` is the current family descriptor;
@@ -26,10 +46,10 @@ available.
 
 Although route handlers stay product-local, the shared client owns the browser side
 of the Dragon API v2 wire contract. A consumer must provide `/api/v2/info`,
-`/api/v2/state`, `/api/v2/events`, and the command/settings routes used by the SPA,
-or provide a compatible adapter. The client attempts SSE for live updates and falls
-back to serialized polling. Multi-device discovery/grouping and any future WebSocket
-transport are separate follow-ons.
+`/api/v2/state` and the command/settings routes used by its selected surface. SSE at
+`/api/v2/events` is optional: the client attempts it first and falls back to
+serialized polling when it is unavailable. Multi-device discovery/grouping and any
+future WebSocket transport are separate follow-ons.
 
 Consuming builds require a host `gzip`; CMake uses `gzip -9 -n` to generate the
 reproducible embedded asset.
