@@ -39,10 +39,11 @@ typedef struct {
 
 esp_err_t dc_bambu_start(void);
 
-// Overwrite saved config (NVS). The running client (once implemented) will
-// reconnect with the new settings.
+// Overwrite saved config (NVS). Safe before dc_bambu_start(); the running client
+// (once implemented) will reconnect with the new settings.
 esp_err_t dc_bambu_set_config(const dc_bambu_config_t *cfg);
 
+// Returns persisted config even when dc_bambu_start() has not been called.
 esp_err_t dc_bambu_get_config(dc_bambu_config_t *out);
 esp_err_t dc_bambu_get_status(dc_bambu_status_t *out);
 

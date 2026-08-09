@@ -276,6 +276,8 @@ esp_err_t dc_bambu_set_config(const dc_bambu_config_t *cfg)
         xSemaphoreTake(s_lock, portMAX_DELAY);
         s_cfg = *cfg;
         xSemaphoreGive(s_lock);
+    } else {
+        s_cfg = *cfg;
     }
     return ESP_OK;   // takes effect on next boot (matches dc_moonraker semantics)
 }
@@ -283,6 +285,15 @@ esp_err_t dc_bambu_set_config(const dc_bambu_config_t *cfg)
 esp_err_t dc_bambu_get_config(dc_bambu_config_t *out)
 {
     if (out == NULL) return ESP_ERR_INVALID_ARG;
+    if (!s_lock) {
+        dc_bambu_config_t persisted;
+        if (nvs_load(&persisted) == ESP_OK) {
+            *out = persisted;
+        } else {
+            *out = s_cfg;
+        }
+        return ESP_OK;
+    }
     if (s_lock) xSemaphoreTake(s_lock, portMAX_DELAY);
     *out = s_cfg;
     if (s_lock) xSemaphoreGive(s_lock);
@@ -308,6 +319,13 @@ esp_err_t dc_bambu_clear_config(void)
     nvs_erase_key(h, KEY_CODE);
     nvs_commit(h);
     nvs_close(h);
+    if (s_lock) {
+        xSemaphoreTake(s_lock, portMAX_DELAY);
+        memset(&s_cfg, 0, sizeof(s_cfg));
+        xSemaphoreGive(s_lock);
+    } else {
+        memset(&s_cfg, 0, sizeof(s_cfg));
+    }
     return ESP_OK;
 }
 
