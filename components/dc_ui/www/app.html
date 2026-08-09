@@ -455,10 +455,11 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
 .vent-threshold .touch-value{ margin:10px 0 5px; font-size:27px; }
 .vent-settings{ flex-direction:column; gap:12px; max-width:560px; width:100%; }
 .provision-overlay{ position:fixed; inset:0; z-index:20; overflow:auto; padding:18px;
-  background:color-mix(in srgb,var(--background) 94%,transparent); }
+  background:var(--background); }
 .provision-shell{ width:min(680px,100%); margin:0 auto; display:flex; flex-direction:column; gap:10px; }
 .provision-head{ display:flex; align-items:center; justify-content:space-between; gap:10px; }
-.provision-card{ padding:14px; border:1px solid var(--border); border-radius:var(--radius-lg); background:var(--card); }
+.provision-card{ padding:14px; border:1px solid var(--border); border-radius:var(--radius-lg);
+  background:light-dark(rgb(247 247 247),rgb(38 38 38)); }
 .provision-card h3{ margin:0 0 9px; font-size:13px; }
 .provision-grid{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; }
 .provision-field{ display:flex; flex-direction:column; gap:4px; min-width:0; }
@@ -1074,12 +1075,26 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
      Wi-Fi/AP/OTA/log/reset routes, and this renderer. ---- */
   var setupData=null;
   function setupMessage(id,text,error){ var e=$(id); if(!e)return; e.textContent=text||''; e.className='provision-msg'+(error?' is-error':''); }
+  function dcFetchJson(path,options,retried){
+    options=options||{};
+    var headers=Object.assign({},options.headers||{});
+    if(product==='dragonbreath' && typeof tok==='function') headers['X-DragonBreath-Auth']=tok();
+    var requestOptions=Object.assign({},options,{headers:headers});
+    return fetch(path,requestOptions).then(function(r){ return r.json().catch(function(){return {};}).then(function(j){
+      if(r.status===403 && product==='dragonbreath' && !retried){
+        localStorage.removeItem('db_tok');
+        var t=prompt('DragonBreath control token');
+        if(t){ localStorage.setItem('db_tok',t); return dcFetchJson(path,options,true); }
+      }
+      if(!r.ok)throw j;
+      return j;
+    }); });
+  }
   function dcRequest(path,body,raw){
     var options={method:'POST',headers:{}};
-    if(product==='dragonbreath' && typeof hdr==='function') Object.assign(options.headers,hdr());
     if(raw){ options.body=raw; options.headers['Content-Type']='application/octet-stream'; }
     else { options.body=JSON.stringify(body||{}); options.headers['Content-Type']='application/json'; }
-    return fetch(path,options).then(function(r){ return r.json().catch(function(){return {};}).then(function(j){ if(!r.ok)throw j; return j; }); });
+    return dcFetchJson(path,options);
   }
   function fieldControl(field){
     var wrap=document.createElement('div'); wrap.className='provision-field';
@@ -1125,7 +1140,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     if(d.last_failure)setupMessage('dc-wifi-msg','Could not join '+d.last_failure.ssid+': '+d.last_failure.reason,true);
   }
   function loadProvisioning(){
-    return fetch('/api/v1/provisioning',{cache:'no-store'}).then(function(r){if(!r.ok)throw 0;return r.json();}).then(applyProvisioning);
+    return dcFetchJson('/api/v1/provisioning',{cache:'no-store'}).then(applyProvisioning);
   }
   function openProvisioning(){ $('dc-provisioning').hidden=false; location.hash='setup'; loadProvisioning().catch(function(){setupMessage('dc-system-msg','Provisioning service is unavailable in this firmware.',true);}); }
   document.querySelectorAll('[data-open-provisioning]').forEach(function(a){a.addEventListener('click',function(e){e.preventDefault();openProvisioning();});});
@@ -1133,7 +1148,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
   $('dc-wifi-scan').addEventListener('click',function(){setupMessage('dc-wifi-msg','Scanning…');dcRequest('/api/v1/provisioning/scan',{}).then(function(){setTimeout(loadProvisioning,1800);}).catch(function(j){setupMessage('dc-wifi-msg',j.error||'Scan failed.',true);});});
   $('dc-wifi-save').addEventListener('click',function(){var ssid=$('dc-wifi-network').value||$('dc-wifi-manual').value.trim();setupMessage('dc-wifi-msg','Saving…');dcRequest('/api/v1/provisioning/wifi',{ssid:ssid,password:$('dc-wifi-password').value}).then(function(){setupMessage('dc-wifi-msg','Saved. Rebooting…');}).catch(function(j){setupMessage('dc-wifi-msg',j.error||'Could not save Wi-Fi.',true);});});
   $('dc-ap-save').addEventListener('click',function(){setupMessage('dc-ap-msg','Saving…');dcRequest('/api/v1/provisioning/ap',{ssid:$('dc-ap-ssid').value,password:$('dc-ap-password').value,ip:$('dc-ap-ip').value,enabled:$('dc-ap-enabled').value==='1'}).then(function(){setupMessage('dc-ap-msg','Saved. Rebooting…');}).catch(function(j){setupMessage('dc-ap-msg',j.error||'Could not save AP settings.',true);});});
-  $('dc-load-logs').addEventListener('click',function(){var o={cache:'no-store',headers:{}};if(product==='dragonbreath'&&typeof hdr==='function')Object.assign(o.headers,hdr());fetch('/api/v1/system/logs',o).then(function(r){return r.json().then(function(j){if(!r.ok)throw j;return j;});}).then(function(j){$('dc-logs').textContent=(j.entries||[]).map(function(e){return '['+e.ms+' ms] '+e.text;}).join('\n');}).catch(function(){setupMessage('dc-system-msg','Could not load logs.',true);});});
+  $('dc-load-logs').addEventListener('click',function(){dcFetchJson('/api/v1/system/logs',{cache:'no-store'}).then(function(j){$('dc-logs').textContent=(j.entries||[]).map(function(e){return '['+e.ms+' ms] '+e.text;}).join('\n');}).catch(function(){setupMessage('dc-system-msg','Could not load logs.',true);});});
   $('dc-ota-upload').addEventListener('click',function(){var f=$('dc-ota-file').files[0];if(!f){setupMessage('dc-system-msg','Choose a firmware .bin first.',true);return;}setupMessage('dc-system-msg','Uploading and flashing… do not power off.');dcRequest('/api/v1/system/update',null,f).then(function(){setupMessage('dc-system-msg','Flashed. Rebooting…');}).catch(function(j){setupMessage('dc-system-msg',j.error||'Firmware update failed.',true);});});
   $('dc-factory-reset').addEventListener('click',function(){if(!confirm('Erase device settings and reboot?'))return;setupMessage('dc-system-msg','Resetting…');dcRequest('/api/v1/system/reset?confirm=factory-reset',{}).then(function(){setupMessage('dc-system-msg','Reset. Rebooting…');}).catch(function(j){setupMessage('dc-system-msg',j.error||'Factory reset failed.',true);});});
 
@@ -1141,6 +1156,11 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
      not declare capabilities keeps the complete UI visible for compatibility. */
   function applyDeviceInfo(i){
     if(!i) return;
+    /* Render common maintenance identity before product/capability handling so
+       an unsupported descriptor can never suppress firmware diagnostics. */
+    if(i.firmware) u('s-fw', i.firmware);
+    if(i.device_id) u('s-devid', i.device_id);
+    if(i.boot_id) u('s-bootid', i.boot_id);
     var ui=i.ui||{};
     /* An absent schema is the pre-descriptor compatibility case. An unknown
        schema must not reinterpret identity or hide product surfaces. */
@@ -2078,9 +2098,6 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
   fetch('/api/v2/info').then(function(r){ return r.json(); }).then(function(i){
     if(!i) return;
     applyDeviceInfo(i);
-    if(i.firmware) u('s-fw', i.firmware);
-    if(i.device_id) u('s-devid', i.device_id);
-    if(i.boot_id) u('s-bootid', i.boot_id);
     /* Inactive OTA slot: show what's there + offer to boot it (revert to stock, or
        roll back a version). Hidden when the slot is empty/unreadable. */
     var slot = i.inactive_slot;
