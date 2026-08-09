@@ -60,6 +60,12 @@ if (!html.includes("#dc-product-setup{ display:flex; flex-direction:column; gap:
   throw new Error("dynamic provisioning cards must retain the shell spacing");
 }
 
+// Filament zones only take effect in AUTO during an active print. The zones card is
+// the only place this is stated now that product setup pages no longer edit zones.
+if (!/Zones do nothing in Manual\/Off\./.test(html)) {
+  throw new Error("filament zones card must state that zones apply only in AUTO");
+}
+
 // Common maintenance identity must render before descriptor compatibility or
 // capability gating can return/throw. This keeps diagnostics useful even when a
 // newer product descriptor reaches an older family SPA.
