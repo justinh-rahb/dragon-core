@@ -392,6 +392,8 @@ esp_err_t dc_portal_start(const dc_portal_config_t *config)
         { .uri = "/api/v1/provisioning/product", .method = HTTP_POST, .handler = product_post },
         { .uri = "/api/v1/system/logs", .method = HTTP_GET, .handler = logs_get },
         { .uri = "/api/v1/system/update", .method = HTTP_POST, .handler = update_post },
+        // Compatibility alias used by existing DragonBreath/DragonVent clients.
+        { .uri = "/update", .method = HTTP_POST, .handler = update_post },
         { .uri = "/api/v1/system/reset", .method = HTTP_POST, .handler = reset_post },
         { .uri = "/setup", .method = HTTP_GET, .handler = spa_get },
         { .uri = "/", .method = HTTP_GET, .handler = spa_get },

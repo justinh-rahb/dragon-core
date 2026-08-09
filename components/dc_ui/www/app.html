@@ -2072,7 +2072,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
 
   /* Device info -> the Maintenance panel. (The old header brand/tooltip was
      removed; the firmware version is shown in the footer, populated in apply().) */
-  if(location.hash==='#setup'||location.pathname==='/setup') openProvisioning();
+  if(location.hash==='#setup'||location.pathname==='/setup'||location.pathname==='/fw'||location.pathname==='/console') openProvisioning();
   else loadProvisioning().then(function(d){ if(d.network_mode==='ap') openProvisioning(); }).catch(function(){});
 
   fetch('/api/v2/info').then(function(r){ return r.json(); }).then(function(i){
