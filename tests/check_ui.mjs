@@ -38,11 +38,33 @@ for (const marker of [
   "ventPost('/api/v2/settings'",
   "ventCommand('manual'",
   'id="dc-provisioning"',
+  "function dcFetchJson(path,options,retried)",
+  "headers['X-DragonBreath-Auth']=tok()",
   "function loadProvisioning()",
+  "dcFetchJson('/api/v1/provisioning',{cache:'no-store'})",
   "'/api/v1/provisioning/product'",
   "'/api/v1/system/update'",
 ]) {
   if (!html.includes(marker)) throw new Error(`missing family-SPA contract marker: ${marker}`);
+}
+
+// Provisioning is a full-screen device surface, not a translucent modal over
+// live controls. Keep both the backdrop and cards opaque in either theme.
+if (!html.includes("background:var(--background);")) {
+  throw new Error("provisioning overlay must use the opaque app background");
+}
+if (!html.includes("background:light-dark(rgb(247 247 247),rgb(38 38 38));")) {
+  throw new Error("provisioning cards must use an opaque surface");
+}
+
+// Common maintenance identity must render before descriptor compatibility or
+// capability gating can return/throw. This keeps diagnostics useful even when a
+// newer product descriptor reaches an older family SPA.
+const infoStart = html.indexOf("function applyDeviceInfo(i)");
+const firmwareRender = html.indexOf("if(i.firmware) u('s-fw', i.firmware);", infoStart);
+const schemaGate = html.indexOf("if(ui.schema!=null && ui.schema!==1) return", infoStart);
+if (infoStart < 0 || firmwareRender < infoStart || schemaGate < firmwareRender) {
+  throw new Error("maintenance identity must render before descriptor gating");
 }
 
 console.log("family SPA JavaScript and capability contract: PASS");
