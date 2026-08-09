@@ -596,7 +596,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
         </section>
         <section class="card zones-card" id="zones-custom-card" hidden>
           <h3><svg class="icon"><use href="#i-spool"/></svg> Custom profiles</h3>
-          <p class="muted">Add profiles for filaments not in the built-in set (PA, PCTG, …).</p>
+          <p class="muted">Add profiles for filaments not in the built-in set (PA, PCTG, …). Like the built-in zones, custom profiles only take effect while the heater is in <b>AUTO</b> and a Bambu print is running — they do nothing in Manual/Off.</p>
           <div id="zones-custom-list" class="zones-list"></div>
           <div class="zones-add">
             <input id="zc-name" class="zone-in zone-in-name" type="text" placeholder="name" maxlength="11" autocomplete="off">
@@ -773,7 +773,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
         <div class="set-card">
           <h3>Foldback cut (advanced)</h3>
           <div class="set-warn"><svg class="icon"><use href="#i-alert"/></svg>
-            <span><strong>Danger — experts only.</strong> Changing this will likely cause the element to trip the <strong>105&nbsp;°C thermal protection</strong> (a latched over-temp fault needing a manual clear) — especially if raised. Only adjust it if you know <em>exactly</em> what you're doing, and always in conjunction with the diagnostic tool in the repo (<code>tools/diag.py</code>) so you can watch the real element temperature while you tune. The fixed 105&nbsp;°C hardware cutoff still protects the hardware regardless. If unsure, leave it on <strong>auto</strong>.</span>
+            <span><strong>Danger — experts only.</strong> Changing this will likely cause the element to trip the <strong>105&nbsp;°C thermal protection</strong> (a latched over-temp fault needing a manual clear) — especially if raised. Only adjust it if you know <em>exactly</em> what you're doing, and always in conjunction with the built-in diagnostics page (<code>/diag</code> in the web UI — no USB needed) so you can watch the real element temperature while you tune. The fixed 105&nbsp;°C hardware cutoff still protects the hardware regardless. If unsure, leave it on <strong>auto</strong>.</span>
           </div>
           <div class="ctl-group">
             <div class="ctl-head">
