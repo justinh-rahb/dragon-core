@@ -21,6 +21,9 @@ jobs:
       - name: Run Bambu parser tests
         run: tests/run_bambu_host_test.sh
 
+      - name: Test Wi-Fi credential boundary validation
+        run: tests/run_wifi_validate_host_test.sh
+
       - name: Check family SPA syntax and capability contract
         run: node tests/check_ui.mjs
 
@@ -41,4 +44,5 @@ jobs:
         with:
           esp_idf_version: v5.3
           target: esp32c3
-          path: tests/idf-build
+          path: .
+          command: tools/idf-build.sh tests/idf-build esp32c3 build

@@ -6,6 +6,7 @@
 // firmware's NVS layout (namespace "app_nvs", keys "ssid" / "password").
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include "esp_err.h"
 #include "esp_wifi_types.h"
@@ -23,7 +24,7 @@ typedef struct {
     const char *hostname;       // DNS-safe hostname, for example "dragonbreath"
     const char *instance_name;  // human-readable mDNS HTTP service instance
     const char *ap_ssid_prefix; // for example "DragonBreath_"
-    const char *ap_password;    // empty for an open setup AP; otherwise 8-64 chars
+    const char *ap_password;    // empty for open; 8-63 chars or a 64-digit hex key
 } dc_wifi_identity_t;
 
 // Configure product-specific network identity. Must be called before dc_wifi_start().
@@ -43,6 +44,12 @@ typedef struct {
 } dc_wifi_ap_config_t;
 
 #define DC_WIFI_SCAN_MAX 20
+
+// Shared validation used by provisioning adapters and the persistence boundary.
+// SSIDs are at most 32 bytes. Passwords are blank for an open network, 8-63
+// characters, or exactly 64 hexadecimal digits for a raw WPA key.
+bool dc_wifi_ssid_valid(const char *ssid, bool allow_empty);
+bool dc_wifi_password_valid(const char *password);
 
 // Start the WiFi manager. Non-blocking; state transitions happen async.
 esp_err_t dc_wifi_start(void);

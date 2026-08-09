@@ -15,13 +15,13 @@ Product repositories own GPIO mappings, sensors, actuators, safety policy, and t
 | `dc_moonraker` | Moonraker WebSocket client and Klipper print status |
 | `dc_mqtt` | Shared ESP-MQTT session lifecycle, LWT, and event callbacks |
 | `dc_ui` | Embedded, capability-aware browser SPA shared by Dragon products |
+| `dc_portal` | Shared HTTP server, provisioning API, captive DNS, OTA, logs, and recovery routes |
 
 The initial service extraction deliberately started with components already proven in
-DragonBreath and free of board/sensor/actuator dependencies. `dc_ui` is the first web
-layer follow-on: it owns only the static family SPA asset and exposes its compressed
-bytes to a product HTTP server. HTTP, OTA, portal handlers, and the concrete
-`dc_device` boundary remain product-local until their hardware coupling is removed
-behind golden API-response tests.
+DragonBreath and free of board/sensor/actuator dependencies. `dc_ui` owns the static
+family SPA; `dc_portal` owns its HTTP delivery and the board-neutral provisioning and
+recovery plane. Products register API routes and provide a schema plus callbacks for
+their own settings, reset behavior, and optional authorization.
 
 ## Consuming from an ESP-IDF application
 
@@ -58,6 +58,10 @@ dependencies:
     git: https://github.com/justinh-rahb/dragon-core.git
     path: components/dc_ui
     version: <tag-or-commit>
+  dc_portal:
+    git: https://github.com/justinh-rahb/dragon-core.git
+    path: components/dc_portal
+    version: <tag-or-commit>
 ```
 
 Applications should commit `dependencies.lock` when consuming tagged or commit-pinned
@@ -83,6 +87,8 @@ dependencies:
     path: ../../dragon-core/components/dc_mqtt
   dc_ui:
     path: ../../dragon-core/components/dc_ui
+  dc_portal:
+    path: ../../dragon-core/components/dc_portal
 ```
 
 ## Compatibility
@@ -92,6 +98,11 @@ namespaces and keys so moving DragonBreath from its former local `pb_*` copies d
 erase saved Wi-Fi, Moonraker, Bambu, or control-source configuration.
 
 Requires ESP-IDF 5.3 or newer.
+
+For local and CI builds, use `tools/idf-build.sh <project> <target> <build-dir>`.
+It explicitly locates the Xtensa/RISC-V compiler required by the target and rejects
+stale Component Manager locks before CMake can quietly reuse a different pinned
+core revision.
 
 ## License
 

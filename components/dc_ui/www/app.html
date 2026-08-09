@@ -454,6 +454,22 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
   font-weight:600; text-transform:uppercase; }
 .vent-threshold .touch-value{ margin:10px 0 5px; font-size:27px; }
 .vent-settings{ flex-direction:column; gap:12px; max-width:560px; width:100%; }
+.provision-overlay{ position:fixed; inset:0; z-index:20; overflow:auto; padding:18px;
+  background:color-mix(in srgb,var(--background) 94%,transparent); }
+.provision-shell{ width:min(680px,100%); margin:0 auto; display:flex; flex-direction:column; gap:10px; }
+.provision-head{ display:flex; align-items:center; justify-content:space-between; gap:10px; }
+.provision-card{ padding:14px; border:1px solid var(--border); border-radius:var(--radius-lg); background:var(--card); }
+.provision-card h3{ margin:0 0 9px; font-size:13px; }
+.provision-grid{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; }
+.provision-field{ display:flex; flex-direction:column; gap:4px; min-width:0; }
+.provision-field label{ color:var(--muted-foreground); font-size:11px; font-weight:600; text-transform:uppercase; }
+.provision-field input,.provision-field select{ min-height:34px; width:100%; padding:5px 8px; border:1px solid var(--input);
+  border-radius:var(--radius-lg); color:var(--foreground); background:var(--secondary); font:inherit; }
+.provision-actions{ display:flex; flex-wrap:wrap; gap:7px; margin-top:10px; }
+.provision-msg{ min-height:18px; margin-top:7px; color:var(--muted-foreground); font-size:12px; }
+.provision-msg.is-error{ color:var(--destructive); }
+.provision-log{ max-height:180px; overflow:auto; white-space:pre-wrap; font:11px/1.4 ui-monospace,monospace; }
+@media(max-width:560px){ .provision-grid{ grid-template-columns:1fr; } }
 @container (max-width:620px){
   .vent-grid{ grid-template-columns:1fr; grid-template-rows:auto auto auto; }
   .vent-actions{ grid-column:1; }
@@ -855,7 +871,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
           <h3>Network &amp; printer</h3>
           <p class="set-note">Wi-Fi network and Moonraker host/port are configured together on the setup page — changing Wi-Fi re-enters the password, so they are kept on one screen to avoid dropping the device off the network.</p>
           <div class="settings-links">
-            <a class="btn" href="/setup"><svg class="icon"><use href="#i-wifi"/></svg> Wi-Fi &amp; printer setup</a>
+            <a class="btn" href="#setup" data-open-provisioning><svg class="icon"><use href="#i-wifi"/></svg> Wi-Fi &amp; printer setup</a>
           </div>
           <div class="ctl-group" style="margin-top:4px">
             <div class="ctl-head"><span class="form-label">Control token</span></div>
@@ -997,7 +1013,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
         <article class="set-card">
           <h3>Network &amp; printer source</h3>
           <p class="set-note">Wi-Fi credentials, Moonraker or Bambu connection, fallback AP, firmware update, logs and factory reset remain available in the recovery-safe setup page.</p>
-          <a class="btn btn-primary btn-block" href="/setup"><svg class="icon"><use href="#i-settings"/></svg> Open device setup</a>
+          <a class="btn btn-primary btn-block" href="#setup" data-open-provisioning><svg class="icon"><use href="#i-settings"/></svg> Open device setup</a>
         </article>
         <article class="set-card">
           <h3>Appearance</h3>
@@ -1014,6 +1030,36 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
   </div>
 </div>
 
+<section class="provision-overlay" id="dc-provisioning" hidden aria-label="Device setup">
+  <div class="provision-shell">
+    <div class="provision-head"><div><strong id="dc-setup-title">Device setup</strong><div class="set-note" id="dc-setup-mode"></div></div>
+      <button class="btn" type="button" id="dc-setup-close">Close</button></div>
+    <article class="provision-card"><h3>Wi-Fi</h3>
+      <div class="provision-grid">
+        <div class="provision-field"><label for="dc-wifi-network">Network</label><select id="dc-wifi-network"><option value="">Scanning…</option></select></div>
+        <div class="provision-field"><label for="dc-wifi-manual">Hidden SSID</label><input id="dc-wifi-manual" autocomplete="off"></div>
+        <div class="provision-field"><label for="dc-wifi-password">Password</label><input id="dc-wifi-password" type="password" autocomplete="new-password"></div>
+      </div>
+      <div class="provision-actions"><button class="btn" type="button" id="dc-wifi-scan">Rescan</button><button class="btn btn-primary" type="button" id="dc-wifi-save">Save Wi-Fi &amp; reboot</button></div>
+      <div class="provision-msg" id="dc-wifi-msg"></div>
+    </article>
+    <article class="provision-card"><h3>Fallback setup AP</h3>
+      <div class="provision-grid">
+        <div class="provision-field"><label for="dc-ap-ssid">SSID (blank = default)</label><input id="dc-ap-ssid"></div>
+        <div class="provision-field"><label for="dc-ap-password">Password (blank = default)</label><input id="dc-ap-password" type="password" autocomplete="new-password"></div>
+        <div class="provision-field"><label for="dc-ap-ip">Gateway IPv4</label><input id="dc-ap-ip" inputmode="decimal"></div>
+        <div class="provision-field"><label for="dc-ap-enabled">Fallback</label><select id="dc-ap-enabled"><option value="1">Enabled</option><option value="0">Disabled</option></select></div>
+      </div>
+      <div class="provision-actions"><button class="btn btn-primary" type="button" id="dc-ap-save">Save AP &amp; reboot</button></div><div class="provision-msg" id="dc-ap-msg"></div>
+    </article>
+    <div id="dc-product-setup"></div>
+    <article class="provision-card"><h3>Maintenance</h3>
+      <div class="provision-actions"><input id="dc-ota-file" type="file" accept=".bin"><button class="btn" type="button" id="dc-ota-upload">Upload firmware</button><button class="btn" type="button" id="dc-load-logs">Refresh logs</button><button class="btn" type="button" id="dc-factory-reset">Factory reset</button></div>
+      <div class="provision-msg" id="dc-system-msg"></div><pre class="provision-log" id="dc-logs"></pre>
+    </article>
+  </div>
+</section>
+
 <script>
 (function(){
   var app = document.querySelector('.app');
@@ -1022,6 +1068,74 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
   var $ = function(id){ return document.getElementById(id); };
   function u(id, v){ var e=$(id); if(e) e.textContent = v; }
   function deg(v){ return v==null ? '--' : Number(v).toFixed(1)+'°C'; }
+
+  /* ---- Shared provisioning and recovery plane (dc_portal). The product only
+     supplies a field schema and persistence callback; core owns the transport,
+     Wi-Fi/AP/OTA/log/reset routes, and this renderer. ---- */
+  var setupData=null;
+  function setupMessage(id,text,error){ var e=$(id); if(!e)return; e.textContent=text||''; e.className='provision-msg'+(error?' is-error':''); }
+  function dcRequest(path,body,raw){
+    var options={method:'POST',headers:{}};
+    if(product==='dragonbreath' && typeof hdr==='function') Object.assign(options.headers,hdr());
+    if(raw){ options.body=raw; options.headers['Content-Type']='application/octet-stream'; }
+    else { options.body=JSON.stringify(body||{}); options.headers['Content-Type']='application/json'; }
+    return fetch(path,options).then(function(r){ return r.json().catch(function(){return {};}).then(function(j){ if(!r.ok)throw j; return j; }); });
+  }
+  function fieldControl(field){
+    var wrap=document.createElement('div'); wrap.className='provision-field';
+    var label=document.createElement('label'); label.textContent=field.label||field.key; wrap.appendChild(label);
+    var input;
+    if(field.type==='select'){
+      input=document.createElement('select'); (field.options||[]).forEach(function(opt){
+        var o=document.createElement('option'); o.value=String(opt.value); o.textContent=opt.label||String(opt.value); input.appendChild(o);
+      });
+    } else if(field.type==='boolean'){
+      input=document.createElement('select'); [['1','Enabled'],['0','Disabled']].forEach(function(pair){var o=document.createElement('option');o.value=pair[0];o.textContent=pair[1];input.appendChild(o);});
+    } else {
+      input=document.createElement('input'); input.type=field.secret?'password':(field.type==='number'?'number':'text');
+      if(field.min!=null)input.min=field.min; if(field.max!=null)input.max=field.max; if(field.step!=null)input.step=field.step;
+      if(field.placeholder)input.placeholder=field.placeholder;
+    }
+    input.dataset.setupKey=field.key; input.value=field.value==null?'':(field.type==='boolean'?(field.value?'1':'0'):String(field.value));
+    label.htmlFor='dc-field-'+field.key; input.id=label.htmlFor; wrap.appendChild(input);
+    if(field.hint){var hint=document.createElement('small');hint.textContent=field.hint;wrap.appendChild(hint);}
+    return wrap;
+  }
+  function renderProductSetup(spec){
+    var host=$('dc-product-setup'); host.replaceChildren();
+    if(!spec||!Array.isArray(spec.sections))return;
+    spec.sections.forEach(function(section){
+      var card=document.createElement('article');card.className='provision-card';
+      var title=document.createElement('h3');title.textContent=section.title||'Product settings';card.appendChild(title);
+      if(section.description){var note=document.createElement('p');note.className='set-note';note.textContent=section.description;card.appendChild(note);}
+      var grid=document.createElement('div');grid.className='provision-grid';(section.fields||[]).forEach(function(f){grid.appendChild(fieldControl(f));});card.appendChild(grid);
+      var actions=document.createElement('div');actions.className='provision-actions';var save=document.createElement('button');save.className='btn btn-primary';save.type='button';save.textContent=section.action_label||'Save settings';
+      save.addEventListener('click',function(){
+        var values={};card.querySelectorAll('[data-setup-key]').forEach(function(el){values[el.dataset.setupKey]=el.type==='number'?Number(el.value):(el.value);});
+        setupMessage('dc-system-msg','Saving…');dcRequest('/api/v1/provisioning/product',{values:values}).then(function(j){setupMessage('dc-system-msg',j.message||'Settings saved.');loadProvisioning();}).catch(function(j){setupMessage('dc-system-msg',j.error||'Could not save settings.',true);});
+      });actions.appendChild(save);card.appendChild(actions);host.appendChild(card);
+    });
+  }
+  function applyProvisioning(d){
+    setupData=d;product=d.product||product;u('dc-setup-title',(d.display_name||'Dragon Device')+' setup');u('dc-setup-mode',d.network_mode==='ap'?'Connected to the device setup network':'Managing this device on your LAN');
+    var select=$('dc-wifi-network');select.replaceChildren();var first=document.createElement('option');first.value='';first.textContent=(d.networks||[]).length?'Choose a network':'No scan results yet';select.appendChild(first);
+    (d.networks||[]).forEach(function(n){var o=document.createElement('option');o.value=n.ssid;o.textContent=n.ssid+' · '+n.rssi+' dBm'+(n.secured?' · secured':'');select.appendChild(o);});
+    var ap=d.fallback_ap||{};$('dc-ap-ssid').value=ap.ssid||'';$('dc-ap-password').value='';$('dc-ap-ip').value=ap.ip||'';$('dc-ap-enabled').value=ap.enabled===false?'0':'1';
+    renderProductSetup(d.product_setup);
+    if(d.last_failure)setupMessage('dc-wifi-msg','Could not join '+d.last_failure.ssid+': '+d.last_failure.reason,true);
+  }
+  function loadProvisioning(){
+    return fetch('/api/v1/provisioning',{cache:'no-store'}).then(function(r){if(!r.ok)throw 0;return r.json();}).then(applyProvisioning);
+  }
+  function openProvisioning(){ $('dc-provisioning').hidden=false; location.hash='setup'; loadProvisioning().catch(function(){setupMessage('dc-system-msg','Provisioning service is unavailable in this firmware.',true);}); }
+  document.querySelectorAll('[data-open-provisioning]').forEach(function(a){a.addEventListener('click',function(e){e.preventDefault();openProvisioning();});});
+  $('dc-setup-close').addEventListener('click',function(){$('dc-provisioning').hidden=true;if(location.hash==='#setup')history.replaceState(null,'',location.pathname);});
+  $('dc-wifi-scan').addEventListener('click',function(){setupMessage('dc-wifi-msg','Scanning…');dcRequest('/api/v1/provisioning/scan',{}).then(function(){setTimeout(loadProvisioning,1800);}).catch(function(j){setupMessage('dc-wifi-msg',j.error||'Scan failed.',true);});});
+  $('dc-wifi-save').addEventListener('click',function(){var ssid=$('dc-wifi-network').value||$('dc-wifi-manual').value.trim();setupMessage('dc-wifi-msg','Saving…');dcRequest('/api/v1/provisioning/wifi',{ssid:ssid,password:$('dc-wifi-password').value}).then(function(){setupMessage('dc-wifi-msg','Saved. Rebooting…');}).catch(function(j){setupMessage('dc-wifi-msg',j.error||'Could not save Wi-Fi.',true);});});
+  $('dc-ap-save').addEventListener('click',function(){setupMessage('dc-ap-msg','Saving…');dcRequest('/api/v1/provisioning/ap',{ssid:$('dc-ap-ssid').value,password:$('dc-ap-password').value,ip:$('dc-ap-ip').value,enabled:$('dc-ap-enabled').value==='1'}).then(function(){setupMessage('dc-ap-msg','Saved. Rebooting…');}).catch(function(j){setupMessage('dc-ap-msg',j.error||'Could not save AP settings.',true);});});
+  $('dc-load-logs').addEventListener('click',function(){var o={cache:'no-store',headers:{}};if(product==='dragonbreath'&&typeof hdr==='function')Object.assign(o.headers,hdr());fetch('/api/v1/system/logs',o).then(function(r){return r.json().then(function(j){if(!r.ok)throw j;return j;});}).then(function(j){$('dc-logs').textContent=(j.entries||[]).map(function(e){return '['+e.ms+' ms] '+e.text;}).join('\n');}).catch(function(){setupMessage('dc-system-msg','Could not load logs.',true);});});
+  $('dc-ota-upload').addEventListener('click',function(){var f=$('dc-ota-file').files[0];if(!f){setupMessage('dc-system-msg','Choose a firmware .bin first.',true);return;}setupMessage('dc-system-msg','Uploading and flashing… do not power off.');dcRequest('/api/v1/system/update',null,f).then(function(){setupMessage('dc-system-msg','Flashed. Rebooting…');}).catch(function(j){setupMessage('dc-system-msg',j.error||'Firmware update failed.',true);});});
+  $('dc-factory-reset').addEventListener('click',function(){if(!confirm('Erase device settings and reboot?'))return;setupMessage('dc-system-msg','Resetting…');dcRequest('/api/v1/system/reset?confirm=factory-reset',{}).then(function(){setupMessage('dc-system-msg','Reset. Rebooting…');}).catch(function(j){setupMessage('dc-system-msg',j.error||'Factory reset failed.',true);});});
 
   /* Runtime family identity and feature gating. Older product firmware that does
      not declare capabilities keeps the complete UI visible for compatibility. */
@@ -1958,6 +2072,9 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
 
   /* Device info -> the Maintenance panel. (The old header brand/tooltip was
      removed; the firmware version is shown in the footer, populated in apply().) */
+  if(location.hash==='#setup'||location.pathname==='/setup'||location.pathname==='/fw'||location.pathname==='/console') openProvisioning();
+  else loadProvisioning().then(function(d){ if(d.network_mode==='ap') openProvisioning(); }).catch(function(){});
+
   fetch('/api/v2/info').then(function(r){ return r.json(); }).then(function(i){
     if(!i) return;
     applyDeviceInfo(i);

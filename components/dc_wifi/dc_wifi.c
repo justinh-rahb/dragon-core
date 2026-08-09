@@ -300,9 +300,11 @@ static void start_ap_mode(void)
     apply_ap_ip(cfg.ip);
 
     wifi_config_t ap = {0};
-    strncpy((char *)ap.ap.ssid,     cfg.ssid,     sizeof(ap.ap.ssid) - 1);
-    strncpy((char *)ap.ap.password, cfg.password, sizeof(ap.ap.password) - 1);
-    ap.ap.ssid_len       = strlen((const char *)ap.ap.ssid);
+    size_t ssid_len = strlen(cfg.ssid);
+    size_t password_len = strlen(cfg.password);
+    memcpy(ap.ap.ssid, cfg.ssid, ssid_len);
+    memcpy(ap.ap.password, cfg.password, password_len);
+    ap.ap.ssid_len       = ssid_len;
     ap.ap.channel        = 1;
     ap.ap.max_connection = 4;
     // Open network is legal too, but WPA2 requires ≥ 8 chars for the password.
@@ -319,7 +321,7 @@ static void start_ap_mode(void)
     // uint32_t is 'long unsigned' under IDF 5.3's toolchain — cast per octet
     // so %u picks up plain unsigned int.
     ESP_LOGI(TAG, "AP SSID=%s ip=%u.%u.%u.%u",
-             ap.ap.ssid,
+             cfg.ssid,
              (unsigned)((cfg.ip >> 24) & 0xFF),
              (unsigned)((cfg.ip >> 16) & 0xFF),
              (unsigned)((cfg.ip >>  8) & 0xFF),
@@ -335,8 +337,8 @@ static void start_sta_mode(const char *ssid, const char *pass)
     snprintf(s_sta_ssid, sizeof s_sta_ssid, "%s", ssid);   // remember for a failed-join message
 
     wifi_config_t sta = {0};
-    strncpy((char *)sta.sta.ssid,     ssid, sizeof(sta.sta.ssid) - 1);
-    strncpy((char *)sta.sta.password, pass, sizeof(sta.sta.password) - 1);
+    memcpy(sta.sta.ssid, ssid, strlen(ssid));
+    memcpy(sta.sta.password, pass, strlen(pass));
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &sta));
@@ -454,7 +456,7 @@ esp_err_t dc_wifi_set_identity(const dc_wifi_identity_t *identity)
     size_t password_len = strlen(identity->ap_password);
     if (hostname_len >= sizeof(s_hostname) || instance_len >= sizeof(s_instance_name) ||
         prefix_len >= sizeof(s_ap_ssid_prefix) || password_len >= sizeof(s_ap_password) ||
-        (password_len > 0 && password_len < 8)) {
+        !dc_wifi_password_valid(identity->ap_password)) {
         return ESP_ERR_INVALID_ARG;
     }
     snprintf(s_hostname, sizeof(s_hostname), "%s", identity->hostname);
@@ -536,7 +538,8 @@ esp_err_t dc_wifi_start(void)
 
 esp_err_t dc_wifi_save_creds_and_reboot(const char *ssid, const char *password)
 {
-    if (ssid == NULL || ssid[0] == '\0') return ESP_ERR_INVALID_ARG;
+    if (!dc_wifi_ssid_valid(ssid, false) ||
+        !dc_wifi_password_valid(password)) return ESP_ERR_INVALID_ARG;
     ESP_LOGI(TAG, "saving creds for SSID=%s; rebooting", ssid);
     esp_err_t err = nvs_write_str(KEY_SSID, ssid);
     if (err == ESP_OK) err = nvs_write_str(KEY_PASS, password ? password : "");
@@ -618,7 +621,8 @@ esp_err_t dc_wifi_get_ap_config(dc_wifi_ap_config_t *out)
 
 esp_err_t dc_wifi_set_ap_config_and_reboot(const dc_wifi_ap_config_t *cfg)
 {
-    if (cfg == NULL) return ESP_ERR_INVALID_ARG;
+    if (cfg == NULL || !dc_wifi_ssid_valid(cfg->ssid, true) ||
+        !dc_wifi_password_valid(cfg->password)) return ESP_ERR_INVALID_ARG;
 
     nvs_handle_t h;
     esp_err_t err = nvs_open(NVS_NS, NVS_READWRITE, &h);

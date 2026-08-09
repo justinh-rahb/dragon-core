@@ -1,8 +1,9 @@
 # dc_ui
 
 `dc_ui` packages the dependency-free Dragon-family browser SPA as a reproducible
-gzip asset. Product firmware keeps ownership of HTTP, OTA, setup, authentication,
-and hardware policy; it serves the bytes returned by `dc_ui_spa_asset()`.
+gzip asset. `dc_portal` serves it and owns the shared provisioning/recovery
+transport. Product firmware keeps ownership of authentication, API v2, and
+hardware policy.
 
 The SPA discovers product identity and supported surfaces from `GET /api/v2/info`.
 The additive family descriptor is:
@@ -53,3 +54,8 @@ future WebSocket transport are separate follow-ons.
 
 Consuming builds require a host `gzip`; CMake uses `gzip -9 -n` to generate the
 reproducible embedded asset.
+
+The SPA renders `dc_portal`'s versioned `/api/v1/provisioning` schema in a common
+setup overlay. It opens automatically in AP mode, so the same SPA is the normal UI
+on the LAN and on the captive setup network. Product-specific fields are described
+by firmware callbacks rather than compiled into another server-rendered page.
