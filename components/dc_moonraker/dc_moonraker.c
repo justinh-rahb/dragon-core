@@ -470,6 +470,10 @@ esp_err_t dc_moonraker_set_config(const dc_moonraker_config_t *cfg)
     esp_err_t err = nvs_save(cfg);
     if (err != ESP_OK) return err;
 
+    if (!s_lock) {
+        s_cfg = *cfg;
+        return ESP_OK;
+    }
     xSemaphoreTake(s_lock, portMAX_DELAY);
     s_cfg = *cfg;
     stop_client();
@@ -481,6 +485,15 @@ esp_err_t dc_moonraker_set_config(const dc_moonraker_config_t *cfg)
 esp_err_t dc_moonraker_get_config(dc_moonraker_config_t *out)
 {
     if (out == NULL) return ESP_ERR_INVALID_ARG;
+    if (!s_lock) {
+        dc_moonraker_config_t persisted;
+        if (nvs_load(&persisted) == ESP_OK) {
+            *out = persisted;
+        } else {
+            *out = s_cfg;
+        }
+        return ESP_OK;
+    }
     xSemaphoreTake(s_lock, portMAX_DELAY);
     *out = s_cfg;
     xSemaphoreGive(s_lock);
@@ -506,5 +519,12 @@ esp_err_t dc_moonraker_clear_config(void)
     nvs_erase_key(h, KEY_APIKEY);
     nvs_commit(h);
     nvs_close(h);
+    if (s_lock) {
+        xSemaphoreTake(s_lock, portMAX_DELAY);
+        memset(&s_cfg, 0, sizeof(s_cfg));
+        xSemaphoreGive(s_lock);
+    } else {
+        memset(&s_cfg, 0, sizeof(s_cfg));
+    }
     return ESP_OK;
 }

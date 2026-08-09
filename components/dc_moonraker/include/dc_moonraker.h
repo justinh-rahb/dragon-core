@@ -52,10 +52,11 @@ typedef struct {
 
 esp_err_t dc_moonraker_start(void);
 
-// Overwrite the saved config. If the client is running, it reconnects with
-// the new settings.
+// Overwrite the saved config. Safe before dc_moonraker_start(); if the client is
+// running, it reconnects with the new settings.
 esp_err_t dc_moonraker_set_config(const dc_moonraker_config_t *cfg);
 
+// Returns persisted config even when dc_moonraker_start() has not been called.
 esp_err_t dc_moonraker_get_config(dc_moonraker_config_t *out);
 esp_err_t dc_moonraker_get_status(dc_moonraker_status_t *out);
 

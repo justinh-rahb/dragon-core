@@ -15,6 +15,14 @@ void app_main(void)
     // starting a broker connection in the compile-test application.
     dc_mqtt_client_t *mqtt = NULL;
     dc_mqtt_config_t mqtt_config = {0};
+    dc_bambu_config_t bambu_config = {0};
+    dc_moonraker_config_t moonraker_config = {0};
+    // Config APIs are deliberately valid before either client is started. Shared
+    // provisioning uses this to edit inactive sources without losing saved fields.
+    (void)dc_bambu_get_config(&bambu_config);
+    (void)dc_bambu_set_config(&bambu_config);
+    (void)dc_moonraker_get_config(&moonraker_config);
+    (void)dc_moonraker_set_config(&moonraker_config);
     (void)dc_mqtt_start(&mqtt_config, &mqtt);
     (void)dc_mqtt_destroy(mqtt);
     (void)dc_ui_spa_asset();
