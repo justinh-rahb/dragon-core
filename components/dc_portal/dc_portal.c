@@ -229,16 +229,32 @@ static esp_err_t product_post(httpd_req_t *req)
 static esp_err_t logs_get(httpd_req_t *req)
 {
     if (require_auth(req) != ESP_OK) return ESP_OK;
-    dc_evlog_entry_t entries[DC_EVLOG_MAX_ENTRIES];
+    // The full snapshot is ~6.4 KiB. Keeping it on the HTTP task's 8 KiB stack
+    // leaves too little room for cJSON and response handling and resets real
+    // ESP32-C3 hardware with stack protection enabled.
+    dc_evlog_entry_t *entries = calloc(DC_EVLOG_MAX_ENTRIES, sizeof(*entries));
+    if (!entries)
+        return json_error(req, "500 Internal Server Error", "out of memory");
     size_t count = dc_evlog_snapshot(entries, DC_EVLOG_MAX_ENTRIES);
     cJSON *root = cJSON_CreateObject();
-    cJSON *logs = cJSON_AddArrayToObject(root, "entries");
+    cJSON *logs = root ? cJSON_AddArrayToObject(root, "entries") : NULL;
+    if (!root || !logs) {
+        cJSON_Delete(root);
+        free(entries);
+        return json_error(req, "500 Internal Server Error", "out of memory");
+    }
     for (size_t i = 0; i < count; ++i) {
         cJSON *entry = cJSON_CreateObject();
+        if (!entry) {
+            cJSON_Delete(root);
+            free(entries);
+            return json_error(req, "500 Internal Server Error", "out of memory");
+        }
         cJSON_AddNumberToObject(entry, "ms", entries[i].ms);
         cJSON_AddStringToObject(entry, "text", entries[i].text);
         cJSON_AddItemToArray(logs, entry);
     }
+    free(entries);
     return send_json(req, root);
 }
 
