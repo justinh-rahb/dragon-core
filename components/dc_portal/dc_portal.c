@@ -17,6 +17,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lwip/inet.h"
+#include "mbedtls/sha256.h"
 
 static const char *TAG = "dc_portal";
 static httpd_handle_t s_httpd;
@@ -227,6 +228,7 @@ static esp_err_t product_post(httpd_req_t *req)
 
 static esp_err_t logs_get(httpd_req_t *req)
 {
+    if (require_auth(req) != ESP_OK) return ESP_OK;
     dc_evlog_entry_t entries[DC_EVLOG_MAX_ENTRIES];
     size_t count = dc_evlog_snapshot(entries, DC_EVLOG_MAX_ENTRIES);
     cJSON *root = cJSON_CreateObject();
@@ -240,41 +242,106 @@ static esp_err_t logs_get(httpd_req_t *req)
     return send_json(req, root);
 }
 
+static esp_err_t operation_error(httpd_req_t *req, esp_err_t err,
+                                 const char *message)
+{
+    const char *status = err == ESP_ERR_INVALID_STATE ? "409 Conflict" :
+                         err == ESP_ERR_INVALID_ARG ? "400 Bad Request" :
+                         "500 Internal Server Error";
+    return json_error(req, status, message && message[0] ? message : esp_err_to_name(err));
+}
+
+static esp_err_t guard_operation(httpd_req_t *req, dc_portal_operation_t operation)
+{
+    if (!s_config.guard_operation) return ESP_OK;
+    char message[128] = {0};
+    esp_err_t err = s_config.guard_operation(operation, s_config.ctx,
+                                              message, sizeof(message));
+    if (err == ESP_OK) return ESP_OK;
+    operation_error(req, err, message);
+    return err;
+}
+
+static void reboot_task(void *arg)
+{
+    (void)arg;
+    vTaskDelay(pdMS_TO_TICKS(500));
+    esp_restart();
+}
+
 static esp_err_t update_post(httpd_req_t *req)
 {
     if (require_auth(req) != ESP_OK) return ESP_OK;
+    if (guard_operation(req, DC_PORTAL_OPERATION_OTA) != ESP_OK) return ESP_OK;
+    if (req->content_len <= 0)
+        return json_error(req, "400 Bad Request", "empty firmware upload");
     const esp_partition_t *partition = esp_ota_get_next_update_partition(NULL);
     if (!partition) return json_error(req, "500 Internal Server Error", "no OTA partition");
     esp_ota_handle_t update = 0;
     esp_err_t err = esp_ota_begin(partition, OTA_WITH_SEQUENTIAL_WRITES, &update);
     if (err != ESP_OK) return json_error(req, "500 Internal Server Error", esp_err_to_name(err));
     static uint8_t buffer[1024];
+    mbedtls_sha256_context sha;
+    mbedtls_sha256_init(&sha);
+    mbedtls_sha256_starts(&sha, 0);
     int remaining = req->content_len;
     while (remaining > 0) {
         int got = httpd_req_recv(req, (char *)buffer,
                                  remaining < (int)sizeof(buffer) ? remaining : (int)sizeof(buffer));
         if (got == HTTPD_SOCK_ERR_TIMEOUT) continue;
         if (got <= 0 || esp_ota_write(update, buffer, (size_t)got) != ESP_OK) {
+            mbedtls_sha256_free(&sha);
             esp_ota_abort(update);
             return json_error(req, "500 Internal Server Error", "OTA receive/write failed");
         }
+        mbedtls_sha256_update(&sha, buffer, (size_t)got);
         remaining -= got;
     }
+    uint8_t digest[32];
+    mbedtls_sha256_finish(&sha, digest);
+    mbedtls_sha256_free(&sha);
     err = esp_ota_end(update);
-    if (err == ESP_OK) err = esp_ota_set_boot_partition(partition);
     if (err != ESP_OK) return json_error(req, "400 Bad Request", esp_err_to_name(err));
+    esp_app_desc_t image = {0};
+    err = esp_ota_get_partition_description(partition, &image);
+    if (err != ESP_OK)
+        return json_error(req, "400 Bad Request", "cannot read image descriptor");
+    if (s_config.validate_image) {
+        char message[128] = {0};
+        err = s_config.validate_image(&image, s_config.ctx, message, sizeof(message));
+        if (err != ESP_OK) return operation_error(req, err, message);
+    }
+    err = esp_ota_set_boot_partition(partition);
+    if (err != ESP_OK) return json_error(req, "500 Internal Server Error", esp_err_to_name(err));
+    char sha_hex[65];
+    for (size_t i = 0; i < sizeof(digest); ++i)
+        snprintf(&sha_hex[i * 2], 3, "%02x", digest[i]);
     cJSON *reply = cJSON_CreateObject();
     cJSON_AddBoolToObject(reply, "ok", true);
     cJSON_AddBoolToObject(reply, "rebooting", true);
+    cJSON_AddNumberToObject(reply, "bytes", req->content_len);
+    cJSON_AddStringToObject(reply, "sha256", sha_hex);
+    cJSON_AddStringToObject(reply, "project", image.project_name);
+    cJSON_AddStringToObject(reply, "version", image.version);
     send_json(req, reply);
-    vTaskDelay(pdMS_TO_TICKS(500));
-    esp_restart();
+    xTaskCreate(reboot_task, "dc_portal_reboot", 2048, NULL, 5, NULL);
     return ESP_OK;
+}
+
+static bool reset_confirmed(httpd_req_t *req)
+{
+    char query[96] = {0}, value[32] = {0};
+    return httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK &&
+           httpd_query_key_value(query, "confirm", value, sizeof(value)) == ESP_OK &&
+           strcmp(value, "factory-reset") == 0;
 }
 
 static esp_err_t reset_post(httpd_req_t *req)
 {
     if (require_auth(req) != ESP_OK) return ESP_OK;
+    if (!reset_confirmed(req))
+        return json_error(req, "400 Bad Request", "factory reset requires confirm=factory-reset");
+    if (guard_operation(req, DC_PORTAL_OPERATION_FACTORY_RESET) != ESP_OK) return ESP_OK;
     if (s_config.factory_reset) {
         esp_err_t err = s_config.factory_reset(s_config.ctx);
         if (err != ESP_OK) return json_error(req, "500 Internal Server Error", esp_err_to_name(err));
@@ -284,8 +351,7 @@ static esp_err_t reset_post(httpd_req_t *req)
     cJSON_AddBoolToObject(reply, "ok", true);
     cJSON_AddBoolToObject(reply, "rebooting", true);
     send_json(req, reply);
-    vTaskDelay(pdMS_TO_TICKS(500));
-    esp_restart();
+    xTaskCreate(reboot_task, "dc_portal_reboot", 2048, NULL, 5, NULL);
     return ESP_OK;
 }
 
@@ -310,8 +376,11 @@ esp_err_t dc_portal_start(const dc_portal_config_t *config)
     s_config = *config;
     s_ap_mode = dc_wifi_state() == DC_WIFI_STATE_AP_PORTAL;
     httpd_config_t http = HTTPD_DEFAULT_CONFIG();
+    if (config->httpd_config) http = *config->httpd_config;
     http.uri_match_fn = httpd_uri_match_wildcard;
-    http.max_uri_handlers = 16 + config->product_route_count;
+    size_t minimum_handlers = 16 + config->product_route_count;
+    if (http.max_uri_handlers < minimum_handlers)
+        http.max_uri_handlers = minimum_handlers;
     esp_err_t err = httpd_start(&s_httpd, &http);
     if (err != ESP_OK) return err;
 
@@ -333,6 +402,10 @@ esp_err_t dc_portal_start(const dc_portal_config_t *config)
     }
     for (size_t i = 0; i < config->product_route_count; ++i) {
         err = register_handler(&config->product_routes[i]);
+        if (err != ESP_OK) goto fail;
+    }
+    if (config->register_product_routes) {
+        err = config->register_product_routes(s_httpd, config->ctx);
         if (err != ESP_OK) goto fail;
     }
     const httpd_uri_t catchall = { .uri = "/*", .method = HTTP_GET, .handler = spa_get };
