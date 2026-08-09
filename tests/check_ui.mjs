@@ -56,6 +56,9 @@ if (!html.includes("background:var(--background);")) {
 if (!html.includes("background:light-dark(rgb(247 247 247),rgb(38 38 38));")) {
   throw new Error("provisioning cards must use an opaque surface");
 }
+if (!html.includes("#dc-product-setup{ display:flex; flex-direction:column; gap:10px; }")) {
+  throw new Error("dynamic provisioning cards must retain the shell spacing");
+}
 
 // Common maintenance identity must render before descriptor compatibility or
 // capability gating can return/throw. This keeps diagnostics useful even when a
