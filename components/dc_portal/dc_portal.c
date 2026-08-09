@@ -12,6 +12,7 @@
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_ota_ops.h"
+#include "esp_partition.h"
 #include "esp_system.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
@@ -87,6 +88,10 @@ static esp_err_t spa_get(httpd_req_t *req)
 
 static esp_err_t provisioning_get(httpd_req_t *req)
 {
+    // Captive provisioning must remain reachable on an unconfigured AP. Once
+    // joined to a LAN, the product schema can contain operational settings and
+    // must be protected by the product's normal authorization policy.
+    if (!s_ap_mode && require_auth(req) != ESP_OK) return ESP_OK;
     cJSON *root = cJSON_CreateObject();
     cJSON_AddNumberToObject(root, "schema", 1);
     cJSON_AddStringToObject(root, "product", s_config.product ?: "dragon");
@@ -154,10 +159,21 @@ static esp_err_t wifi_post(httpd_req_t *req)
         cJSON_Delete(body);
         return json_error(req, "400 Bad Request", "ssid is required");
     }
-    char saved_ssid[33], saved_password[65];
-    snprintf(saved_ssid, sizeof(saved_ssid), "%s", ssid->valuestring);
-    snprintf(saved_password, sizeof(saved_password), "%s",
-             password ? password->valuestring : "");
+    size_t ssid_len = strlen(ssid->valuestring);
+    const char *password_text = password ? password->valuestring : "";
+    size_t password_len = strlen(password_text);
+    if (!dc_wifi_ssid_valid(ssid->valuestring, false)) {
+        cJSON_Delete(body);
+        return json_error(req, "400 Bad Request", "SSID must be 1-32 bytes");
+    }
+    if (!dc_wifi_password_valid(password_text)) {
+        cJSON_Delete(body);
+        return json_error(req, "400 Bad Request",
+                          "Wi-Fi password must be blank, 8-63 characters, or a 64-digit hex key");
+    }
+    char saved_ssid[33] = {0}, saved_password[65] = {0};
+    memcpy(saved_ssid, ssid->valuestring, ssid_len);
+    memcpy(saved_password, password_text, password_len);
     cJSON_Delete(body);
     cJSON *reply = cJSON_CreateObject();
     cJSON_AddBoolToObject(reply, "ok", true);
@@ -183,12 +199,23 @@ static esp_err_t ap_post(httpd_req_t *req)
     cJSON *password = cJSON_GetObjectItemCaseSensitive(body, "password");
     cJSON *ip = cJSON_GetObjectItemCaseSensitive(body, "ip");
     cJSON *enabled = cJSON_GetObjectItemCaseSensitive(body, "enabled");
-    if (cJSON_IsString(ssid)) snprintf(config.ssid, sizeof(config.ssid), "%s", ssid->valuestring);
-    if (cJSON_IsString(password)) snprintf(config.password, sizeof(config.password), "%s", password->valuestring);
-    if (config.password[0] && strlen(config.password) < 8) {
+    if ((ssid && !cJSON_IsString(ssid)) || (password && !cJSON_IsString(password))) {
         cJSON_Delete(body);
-        return json_error(req, "400 Bad Request", "AP password must be blank or at least 8 characters");
+        return json_error(req, "400 Bad Request", "AP SSID and password must be strings");
     }
+    size_t ssid_len = cJSON_IsString(ssid) ? strlen(ssid->valuestring) : 0;
+    size_t password_len = cJSON_IsString(password) ? strlen(password->valuestring) : 0;
+    if (!dc_wifi_ssid_valid(cJSON_IsString(ssid) ? ssid->valuestring : "", true)) {
+        cJSON_Delete(body);
+        return json_error(req, "400 Bad Request", "AP SSID must be at most 32 bytes");
+    }
+    if (!dc_wifi_password_valid(cJSON_IsString(password) ? password->valuestring : "")) {
+        cJSON_Delete(body);
+        return json_error(req, "400 Bad Request",
+                          "AP password must be blank, 8-63 characters, or a 64-digit hex key");
+    }
+    if (ssid_len) memcpy(config.ssid, ssid->valuestring, ssid_len);
+    if (password_len) memcpy(config.password, password->valuestring, password_len);
     config.ip = cJSON_IsString(ip) && ip->valuestring[0] ? parse_ip(ip->valuestring) : 0;
     if (cJSON_IsString(ip) && ip->valuestring[0] && !config.ip) {
         cJSON_Delete(body);
@@ -278,13 +305,6 @@ static esp_err_t guard_operation(httpd_req_t *req, dc_portal_operation_t operati
     return err;
 }
 
-static void reboot_task(void *arg)
-{
-    (void)arg;
-    vTaskDelay(pdMS_TO_TICKS(500));
-    esp_restart();
-}
-
 static esp_err_t update_post(httpd_req_t *req)
 {
     if (require_auth(req) != ESP_OK) return ESP_OK;
@@ -325,7 +345,14 @@ static esp_err_t update_post(httpd_req_t *req)
     if (s_config.validate_image) {
         char message[128] = {0};
         err = s_config.validate_image(&image, s_config.ctx, message, sizeof(message));
-        if (err != ESP_OK) return operation_error(req, err, message);
+        if (err != ESP_OK) {
+            esp_err_t erase_err = esp_partition_erase_range(partition, 0,
+                                                             partition->erase_size);
+            if (erase_err != ESP_OK)
+                ESP_LOGW(TAG, "could not invalidate rejected OTA image: %s",
+                         esp_err_to_name(erase_err));
+            return operation_error(req, err, message);
+        }
     }
     err = esp_ota_set_boot_partition(partition);
     if (err != ESP_OK) return json_error(req, "500 Internal Server Error", esp_err_to_name(err));
@@ -340,8 +367,9 @@ static esp_err_t update_post(httpd_req_t *req)
     cJSON_AddStringToObject(reply, "project", image.project_name);
     cJSON_AddStringToObject(reply, "version", image.version);
     send_json(req, reply);
-    xTaskCreate(reboot_task, "dc_portal_reboot", 2048, NULL, 5, NULL);
-    return ESP_OK;
+    vTaskDelay(pdMS_TO_TICKS(500));
+    esp_restart();
+    return ESP_OK; // unreachable
 }
 
 static bool reset_confirmed(httpd_req_t *req)
@@ -367,8 +395,9 @@ static esp_err_t reset_post(httpd_req_t *req)
     cJSON_AddBoolToObject(reply, "ok", true);
     cJSON_AddBoolToObject(reply, "rebooting", true);
     send_json(req, reply);
-    xTaskCreate(reboot_task, "dc_portal_reboot", 2048, NULL, 5, NULL);
-    return ESP_OK;
+    vTaskDelay(pdMS_TO_TICKS(500));
+    esp_restart();
+    return ESP_OK; // unreachable
 }
 
 static uint32_t ap_gateway_ip(void)

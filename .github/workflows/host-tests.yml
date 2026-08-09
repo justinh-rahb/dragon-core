@@ -21,6 +21,9 @@ jobs:
       - name: Run Bambu parser tests
         run: tests/run_bambu_host_test.sh
 
+      - name: Test Wi-Fi credential boundary validation
+        run: tests/run_wifi_validate_host_test.sh
+
       - name: Check family SPA syntax and capability contract
         run: node tests/check_ui.mjs
 

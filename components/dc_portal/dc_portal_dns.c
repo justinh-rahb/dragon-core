@@ -11,9 +11,10 @@
 #define DNS_MAX_LEN 512
 
 static const char *TAG = "dc_portal_dns";
-static TaskHandle_t s_task;
+static volatile TaskHandle_t s_task;
 static int s_sock = -1;
 static uint32_t s_redirect_ip;
+static volatile bool s_running;
 
 typedef struct __attribute__((packed)) {
     uint16_t id, flags, qdcount, ancount, nscount, arcount;
@@ -46,7 +47,14 @@ static void dns_task(void *arg)
         vTaskDelete(NULL);
         return;
     }
-    for (;;) {
+    while (s_running) {
+        fd_set read_fds;
+        FD_ZERO(&read_fds);
+        FD_SET(s_sock, &read_fds);
+        struct timeval timeout = { .tv_sec = 0, .tv_usec = 200000 };
+        int ready = select(s_sock + 1, &read_fds, NULL, NULL, &timeout);
+        if (!s_running) break;
+        if (ready <= 0) continue;
         struct sockaddr_in src = {0};
         socklen_t src_len = sizeof(src);
         int received = recvfrom(s_sock, buf, sizeof(buf), 0,
@@ -74,20 +82,29 @@ static void dns_task(void *arg)
         sendto(s_sock, buf, response_len + sizeof(answer), 0,
                (struct sockaddr *)&src, src_len);
     }
+    close(s_sock);
+    s_sock = -1;
+    s_task = NULL;
+    vTaskDelete(NULL);
 }
 
 esp_err_t dc_portal_dns_start(uint32_t redirect_ip)
 {
     if (s_task) return ESP_ERR_INVALID_STATE;
     s_redirect_ip = redirect_ip;
-    return xTaskCreate(dns_task, "dc_portal_dns", 4096, NULL, 4, &s_task) == pdPASS
-        ? ESP_OK : ESP_ERR_NO_MEM;
+    s_running = true;
+    if (xTaskCreate(dns_task, "dc_portal_dns", 4096, NULL, 4,
+                    (TaskHandle_t *)&s_task) == pdPASS) return ESP_OK;
+    s_running = false;
+    return ESP_ERR_NO_MEM;
 }
 
 void dc_portal_dns_stop(void)
 {
-    if (s_sock >= 0) close(s_sock);
-    s_sock = -1;
-    if (s_task) vTaskDelete(s_task);
-    s_task = NULL;
+    s_running = false;
+    // The task owns its socket and exits itself. Its bounded select timeout
+    // avoids deleting a task while lwIP may hold internal state in recvfrom().
+    for (int i = 0; s_task && i < 20; ++i)
+        vTaskDelay(pdMS_TO_TICKS(25));
+    if (s_task) ESP_LOGW(TAG, "DNS task did not stop within 500 ms");
 }
