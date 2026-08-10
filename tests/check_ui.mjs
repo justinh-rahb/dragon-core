@@ -39,13 +39,54 @@ for (const marker of [
   "ventCommand('manual'",
   'id="dc-provisioning"',
   "function dcFetchJson(path,options,retried)",
-  "headers['X-DragonBreath-Auth']=tok()",
+  // Auth transport: exactly one token derivation, used by dcFetchJson, and
+  // sending both the legacy and the family-neutral header name.
+  "function dcTok()",
+  "headers['X-DragonBreath-Auth']=t;",
+  "headers['X-Dragon-Auth']=t;",
+  "var headers=dcAuthHeaders(",
   "function loadProvisioning()",
   "dcFetchJson('/api/v1/provisioning',{cache:'no-store'})",
   "'/api/v1/provisioning/product'",
   "'/api/v1/system/update'",
 ]) {
   if (!html.includes(marker)) throw new Error(`missing family-SPA contract marker: ${marker}`);
+}
+
+// Regression guard for #14: the auth transport must stay product-agnostic. It was
+// previously attached only when product === 'dragonbreath' (and the 403 recovery
+// was gated the same way), which left every other product with no authenticated
+// transport and no way to adopt a control token. Assert the gate cannot return,
+// and that the token is derived in exactly one place.
+for (const forbidden of [
+  "product==='dragonbreath' && typeof tok",
+  "r.status===403 && product===",
+]) {
+  if (html.includes(forbidden)) {
+    throw new Error(`auth transport must not be gated on product identity: ${forbidden}`);
+  }
+}
+const derivations = html.split("localStorage.getItem('db_tok')").length - 1;
+if (derivations !== 1) {
+  throw new Error(`expected exactly one control-token derivation, found ${derivations}`);
+}
+
+// dc_portal's /console is a standalone document, so it cannot import the SPA's
+// helper and keeps its own copy. That agreement is convention, not code — assert
+// it, or a future edit could silently diverge (wrong storage key, or dropping a
+// header name) and fail to authorize against a product reading only one of them.
+const portal = fs.readFileSync(
+  new URL("../components/dc_portal/dc_portal.c", import.meta.url),
+  "utf8",
+);
+for (const [what, needle] of [
+  ["the same localStorage key as the SPA", "localStorage.getItem('db_tok')"],
+  ["the legacy header name", "'X-DragonBreath-Auth':t"],
+  ["the family-neutral header name", "'X-Dragon-Auth':t"],
+]) {
+  if (!portal.includes(needle)) {
+    throw new Error(`/console page must use ${what}: ${needle}`);
+  }
 }
 
 // Provisioning is a full-screen device surface, not a translucent modal over
