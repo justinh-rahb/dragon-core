@@ -20,6 +20,9 @@
 #include "lwip/inet.h"
 #include "mbedtls/sha256.h"
 
+// Minimum stack for the portal's HTTP server task. See dc_portal_start().
+#define DC_PORTAL_MIN_HTTPD_STACK 8192
+
 static const char *TAG = "dc_portal";
 static httpd_handle_t s_httpd;
 static dc_portal_config_t s_config;
@@ -532,6 +535,16 @@ esp_err_t dc_portal_start(const dc_portal_config_t *config)
     size_t minimum_handlers = 16 + config->product_route_count;
     if (http.max_uri_handlers < minimum_handlers)
         http.max_uri_handlers = minimum_handlers;
+    // provisioning_get serializes the product descriptor AND the full Wi-Fi scan
+    // list through cJSON's recursive printer, with the product's float fields
+    // going via newlib's dtoa. Both are stack-hungry, and the 4096-byte
+    // HTTPD_DEFAULT_CONFIG stack overflows once a handful of networks are in
+    // range — faulting inside _Balloc or print_string_ptr rather than tripping
+    // the stack canary, which is only checked on a context switch. Raised to a
+    // floor rather than assigned, so a product supplying a larger stack in its
+    // own httpd_config keeps it. Must stay AFTER the httpd_config copy above.
+    if (http.stack_size < DC_PORTAL_MIN_HTTPD_STACK)
+        http.stack_size = DC_PORTAL_MIN_HTTPD_STACK;
     esp_err_t err = httpd_start(&s_httpd, &http);
     if (err != ESP_OK) return err;
 
