@@ -1214,7 +1214,9 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
   var updateChecked=false;
   function checkForUpdate(info){
     if(updateChecked)return;var u=info&&info.update;if(!u||!u.repo)return;
-    var cur=info.firmware||'';var m=/^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/.exec(cur);if(!m)return;updateChecked=true;
+    var cur=info.firmware||'';var m=/^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/.exec(cur);if(!m)return;
+    if(/-dirty\b|-g[0-9a-f]{7,}/.test(cur))return;   // local/dev build: don't phone home (shared-IP rate limit)
+    updateChecked=true;
     var c=[+m[1],+m[2],+m[3]];
     fetch('https://api.github.com/repos/'+u.repo+'/releases/latest').then(function(r){return r.ok?r.json():null;}).then(function(d){
       if(!d||!d.tag_name)return;var l=/^v?(\d+)\.(\d+)\.(\d+)/.exec(d.tag_name);if(!l)return;

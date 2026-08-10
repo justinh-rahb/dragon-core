@@ -70,9 +70,12 @@ setup surface offers an update check:
 ```
 
 When present, the SPA makes **one** request per page load to
-`https://api.github.com/repos/<repo>/releases/latest`; if the latest stable tag is
-newer than the running firmware it shows the version, the expected asset SHA-256, and
-a download link. Release-asset bytes are not CORS-readable, so it notifies and links —
+`https://api.github.com/repos/<repo>/releases/latest` — but only on installed builds
+(a stable or `-rc`/`-beta` version). Local/dev builds (`-dirty`, or a `git describe`
+`-g<hash>` suffix) skip the request entirely, so constant dev reloads can't exhaust the
+shared per-IP GitHub rate limit for real users behind the same NAT. When it does run and
+the latest stable tag is newer than the running firmware, it shows the version, the
+expected asset SHA-256, and a download link. Release-asset bytes are not CORS-readable, so it notifies and links —
 the user downloads then uploads via the file picker; it never auto-flashes.
 
 This is the one place the device's admin UI reaches the public internet. It is
