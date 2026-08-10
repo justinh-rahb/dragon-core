@@ -1080,15 +1080,37 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
      Wi-Fi/AP/OTA/log/reset routes, and this renderer. ---- */
   var setupData=null;
   function setupMessage(id,text,error){ var e=$(id); if(!e)return; e.textContent=text||''; e.className='provision-msg'+(error?' is-error':''); }
+  /* ---- Control-token transport, shared by every product ----
+     ONE derivation for every caller: dcFetchJson, the OTA uploader, and the
+     product dashboards' hdr(). 'web' is a CSRF sentinel rather than a secret —
+     dc_portal's presence-only tier accepts any non-empty value, which is enough
+     to defeat cross-origin HTML forms since those cannot set custom headers. A
+     product with a configured control token 403s until the real one is entered.
+
+     Two header names carry the same value. X-DragonBreath-Auth is what shipped
+     products read; X-Dragon-Auth is the family-neutral name new products should
+     read, so the fleet migrates without a flag day. Drop the legacy name once no
+     product reads it.
+
+     Previously the header was attached only when product === 'dragonbreath', so
+     every other product had no authenticated transport at all and could not adopt
+     a control token — and the 403 recovery was gated the same way. See #14. ---- */
+  function dcTok(){ return localStorage.getItem('db_tok') || 'web'; }
+  function dcAuthHeaders(headers){
+    headers=headers||{};
+    var t=dcTok();
+    headers['X-DragonBreath-Auth']=t;
+    headers['X-Dragon-Auth']=t;
+    return headers;
+  }
   function dcFetchJson(path,options,retried){
     options=options||{};
-    var headers=Object.assign({},options.headers||{});
-    if(product==='dragonbreath' && typeof tok==='function') headers['X-DragonBreath-Auth']=tok();
+    var headers=dcAuthHeaders(Object.assign({},options.headers||{}));
     var requestOptions=Object.assign({},options,{headers:headers});
     return fetch(path,requestOptions).then(function(r){ return r.json().catch(function(){return {};}).then(function(j){
-      if(r.status===403 && product==='dragonbreath' && !retried){
+      if(r.status===403 && !retried){
         localStorage.removeItem('db_tok');
-        var t=prompt('DragonBreath control token');
+        var t=prompt('Control token');
         if(t){ localStorage.setItem('db_tok',t); return dcFetchJson(path,options,true); }
       }
       if(!r.ok)throw j;
@@ -1190,11 +1212,10 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
      flash as it receives them, so upload progress tracks flashing. On success, poll the
      rebooting device and return to the dashboard. Presence-only auth needs a non-empty
      header; a configured control token 403s until entered, then retries once. */
-  function otaTok(){return localStorage.getItem('db_tok')||'web';}
   function otaUpload(f,retried){
     var m=$('dc-system-msg');m.className='provision-msg';m.textContent='Uploading & flashing… 0% — do not power off.';
     var up=false;var x=new XMLHttpRequest();x.open('POST','/api/v1/system/update');
-    x.setRequestHeader('X-DragonBreath-Auth',otaTok());
+    var oh=dcAuthHeaders({});Object.keys(oh).forEach(function(k){x.setRequestHeader(k,oh[k]);});
     x.upload.onprogress=function(e){if(e.lengthComputable){var p=Math.round(e.loaded/e.total*100);m.textContent='Uploading & flashing… '+p+'% — do not power off.';}};
     x.upload.onload=function(){up=true;m.textContent='Verifying image… — do not power off.';};
     x.onload=function(){
@@ -1294,8 +1315,10 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
      nothing is injected server-side: default to the "web" CSRF sentinel (accepted
      when no control token is configured); if a token IS configured the server 403s,
      we drop the sentinel and prompt for the real token, cached in localStorage. ---- */
-  function tok(){ return localStorage.getItem('db_tok') || 'web'; }
-  function hdr(){ return { 'X-DragonBreath-Auth': tok(), 'Content-Type': 'application/json' }; }
+  /* Delegates to the shared transport above so there is exactly one token
+     derivation and one place that decides which header names to send. */
+  function tok(){ return dcTok(); }
+  function hdr(){ return dcAuthHeaders({ 'Content-Type': 'application/json' }); }
 
   var rev = 0, lease = null, last = null;
   var actor = sessionStorage.getItem('db_actor');

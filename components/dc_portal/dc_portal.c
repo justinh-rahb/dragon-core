@@ -360,8 +360,11 @@ static const char CONSOLE_BODY[] =
     "<script>"
     // Presence-only auth needs a non-empty header; a real control token 403s
     // until entered. Default to a placeholder so unprotected devices never prompt.
+    // Standalone page: it cannot share the SPA's helper, but it must agree with it
+    // on the storage key and on sending BOTH header names (legacy + family-neutral)
+    // so a product reading either one authorizes this page too.
     "function tok(){return localStorage.getItem('db_tok')||'web';}"
-    "function hdr(){return {'X-DragonBreath-Auth':tok()};}"
+    "function hdr(){var t=tok();return {'X-DragonBreath-Auth':t,'X-Dragon-Auth':t};}"
     "(function(){"
     "var paused=false,last='',needtok=false;"
     "function $(i){return document.getElementById(i);}"
