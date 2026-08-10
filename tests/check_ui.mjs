@@ -71,6 +71,24 @@ if (derivations !== 1) {
   throw new Error(`expected exactly one control-token derivation, found ${derivations}`);
 }
 
+// dc_portal's /console is a standalone document, so it cannot import the SPA's
+// helper and keeps its own copy. That agreement is convention, not code — assert
+// it, or a future edit could silently diverge (wrong storage key, or dropping a
+// header name) and fail to authorize against a product reading only one of them.
+const portal = fs.readFileSync(
+  new URL("../components/dc_portal/dc_portal.c", import.meta.url),
+  "utf8",
+);
+for (const [what, needle] of [
+  ["the same localStorage key as the SPA", "localStorage.getItem('db_tok')"],
+  ["the legacy header name", "'X-DragonBreath-Auth':t"],
+  ["the family-neutral header name", "'X-Dragon-Auth':t"],
+]) {
+  if (!portal.includes(needle)) {
+    throw new Error(`/console page must use ${what}: ${needle}`);
+  }
+}
+
 // Provisioning is a full-screen device surface, not a translucent modal over
 // live controls. Keep both the backdrop and cards opaque in either theme.
 if (!html.includes("background:var(--background);")) {
