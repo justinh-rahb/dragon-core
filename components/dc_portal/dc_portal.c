@@ -358,16 +358,19 @@ static const char CONSOLE_BODY[] =
     "</div></div>"
     "<p style='text-align:center'><small><a href='/'>\xE2\x86\x90 Back to status</a></small></p>"
     "<script>"
-    "function tok(){var t=localStorage.getItem('db_tok');"
-    "if(!t){t=prompt('Control token')||'';if(t)localStorage.setItem('db_tok',t);}return t;}"
+    // Presence-only auth needs a non-empty header; a real control token 403s
+    // until entered. Default to a placeholder so unprotected devices never prompt.
+    "function tok(){return localStorage.getItem('db_tok')||'web';}"
     "function hdr(){return {'X-DragonBreath-Auth':tok()};}"
     "(function(){"
-    "var paused=false,last='';"
+    "var paused=false,last='',needtok=false;"
     "function $(i){return document.getElementById(i);}"
     "function load(){"
     "fetch('/api/v1/system/console',{cache:'no-store',headers:hdr()}).then(function(r){"
-    "if(r.status==403){localStorage.removeItem('db_tok');"
-    "$('c-meta').innerHTML='<small class=warn>Auth rejected \\u2014 reload and re-enter the control token.</small>';return null;}"
+    "if(r.status==403){var e=prompt('Control token');"
+    "if(e){localStorage.setItem('db_tok',e);needtok=false;load();}"
+    "else{needtok=true;$('c-meta').innerHTML='<small class=warn>Control token required \\u2014 reload to enter it.</small>';}"
+    "return null;}"
     "return r.text();"
     "}).then(function(t){"
     "if(t==null)return;t=t.replace(/\\x1b\\[[0-9;]*m/g,'');last=t;var pre=$('c-log');"
@@ -383,7 +386,7 @@ static const char CONSOLE_BODY[] =
     "setTimeout(function(){URL.revokeObjectURL(a.href);},1000);"
     "});"
     "$('c-pause').addEventListener('click',function(){paused=!paused;this.textContent=paused?'Resume':'Pause';if(!paused)load();});"
-    "load();setInterval(function(){if(!paused)load();},2000);"
+    "load();setInterval(function(){if(!paused&&!needtok)load();},2000);"
     "})();</script></body></html>";
 
 static esp_err_t console_page(httpd_req_t *req)
