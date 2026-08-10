@@ -459,6 +459,9 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
 .provision-shell{ width:min(680px,100%); margin:0 auto; display:flex; flex-direction:column; gap:10px; }
 .provision-head{ display:flex; align-items:center; justify-content:space-between; gap:10px; }
 #dc-product-setup{ display:flex; flex-direction:column; gap:10px; }
+.pw-row{ display:flex; gap:8px; align-items:stretch; }
+.pw-row input{ flex:1; }
+.pw-reveal{ flex:none; white-space:nowrap; }
 .provision-card{ padding:14px; border:1px solid var(--border); border-radius:var(--radius-lg);
   background:light-dark(rgb(247 247 247),rgb(38 38 38)); }
 .provision-card h3{ margin:0 0 9px; font-size:13px; }
@@ -1118,6 +1121,22 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     if(field.hint){var hint=document.createElement('small');hint.textContent=field.hint;wrap.appendChild(hint);}
     return wrap;
   }
+  /* Add a Show/Hide toggle to every password field in the setup overlay (Wi-Fi, AP,
+     product secrets) so a mistyped Wi-Fi password is easy to catch. Idempotent. */
+  function addPwToggles(){
+    var scope=$('dc-provisioning'); if(!scope)return;
+    scope.querySelectorAll('input[type=password]').forEach(function(inp){
+      if(inp.parentElement&&inp.parentElement.classList.contains('pw-row'))return;
+      var row=document.createElement('div');row.className='pw-row';
+      inp.parentNode.insertBefore(row,inp);row.appendChild(inp);
+      var b=document.createElement('button');b.type='button';b.className='btn pw-reveal';b.textContent='Show';b.setAttribute('aria-label','Show password');
+      // `reveal` is read BEFORE flipping; type and label are both derived from it in the
+      // same direction, so the label always names the next action and matches the field
+      // state (guards against the classic inverted show/hide bug).
+      b.addEventListener('click',function(){var reveal=inp.type==='password';inp.type=reveal?'text':'password';var lbl=reveal?'Hide':'Show';b.textContent=lbl;b.setAttribute('aria-label',lbl+' password');});
+      row.appendChild(b);
+    });
+  }
   function renderProductSetup(spec){
     var host=$('dc-product-setup'); host.replaceChildren();
     if(!spec||!Array.isArray(spec.sections))return;
@@ -1152,6 +1171,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     (d.networks||[]).forEach(function(n){var o=document.createElement('option');o.value=n.ssid;o.textContent=n.ssid+' · '+n.rssi+' dBm'+(n.secured?' · secured':'');select.appendChild(o);});
     var ap=d.fallback_ap||{};$('dc-ap-ssid').value=ap.ssid||'';$('dc-ap-password').value='';$('dc-ap-ip').value=ap.ip||'';$('dc-ap-enabled').value=ap.enabled===false?'0':'1';
     renderProductSetup(d.product_setup);
+    addPwToggles();
     if(d.last_failure)setupMessage('dc-wifi-msg','Could not join '+d.last_failure.ssid+': '+d.last_failure.reason,true);
   }
   function loadProvisioning(){
