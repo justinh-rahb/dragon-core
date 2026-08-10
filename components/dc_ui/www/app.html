@@ -905,7 +905,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
             <div id="s-slot-row" hidden><dt>Inactive slot</dt><dd id="s-slot">--</dd></div>
           </dl>
           <div class="settings-links">
-            <a class="btn" href="/fw"><svg class="icon"><use href="#i-download"/></svg> Firmware update</a>
+            <button class="btn" type="button" id="s-fw-update"><svg class="icon"><use href="#i-download"/></svg> Firmware update</button>
           </div>
           <div class="set-row" style="margin-top:4px">
             <button class="btn" type="button" id="s-restart"><svg class="icon"><use href="#i-power"/></svg> Restart</button>
@@ -1055,7 +1055,8 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
       <div class="provision-actions"><button class="btn btn-primary" type="button" id="dc-ap-save">Save AP &amp; reboot</button></div><div class="provision-msg" id="dc-ap-msg"></div>
     </article>
     <div id="dc-product-setup"></div>
-    <article class="provision-card"><h3>Maintenance</h3>
+    <article class="provision-card" id="dc-maintenance"><h3>Firmware &amp; maintenance</h3>
+      <div id="dc-update-notice" class="set-note" style="display:none"></div>
       <div class="provision-actions"><input id="dc-ota-file" type="file" accept=".bin"><button class="btn" type="button" id="dc-ota-upload">Upload firmware</button><button class="btn" type="button" id="dc-load-logs">Refresh logs</button><button class="btn" type="button" id="dc-factory-reset">Factory reset</button></div>
       <div class="provision-msg" id="dc-system-msg"></div><pre class="provision-log" id="dc-logs"></pre>
     </article>
@@ -1156,14 +1157,57 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
   function loadProvisioning(){
     return dcFetchJson('/api/v1/provisioning',{cache:'no-store'}).then(applyProvisioning);
   }
-  function openProvisioning(){ $('dc-provisioning').hidden=false; location.hash='setup'; loadProvisioning().catch(function(){setupMessage('dc-system-msg','Provisioning service is unavailable in this firmware.',true);}); }
+  function openProvisioning(target){ $('dc-provisioning').hidden=false; location.hash='setup'; loadProvisioning().then(function(){ if(target){var el=$(target); if(el)el.scrollIntoView({behavior:'smooth',block:'start'}); } }).catch(function(){setupMessage('dc-system-msg','Provisioning service is unavailable in this firmware.',true);}); }
   document.querySelectorAll('[data-open-provisioning]').forEach(function(a){a.addEventListener('click',function(e){e.preventDefault();openProvisioning();});});
   $('dc-setup-close').addEventListener('click',function(){$('dc-provisioning').hidden=true;if(location.hash==='#setup')history.replaceState(null,'',location.pathname);});
   $('dc-wifi-scan').addEventListener('click',function(){setupMessage('dc-wifi-msg','Scanning…');dcRequest('/api/v1/provisioning/scan',{}).then(function(){setTimeout(loadProvisioning,1800);}).catch(function(j){setupMessage('dc-wifi-msg',j.error||'Scan failed.',true);});});
   $('dc-wifi-save').addEventListener('click',function(){var ssid=$('dc-wifi-network').value||$('dc-wifi-manual').value.trim();setupMessage('dc-wifi-msg','Saving…');dcRequest('/api/v1/provisioning/wifi',{ssid:ssid,password:$('dc-wifi-password').value}).then(function(){setupMessage('dc-wifi-msg','Saved. Rebooting…');}).catch(function(j){setupMessage('dc-wifi-msg',j.error||'Could not save Wi-Fi.',true);});});
   $('dc-ap-save').addEventListener('click',function(){setupMessage('dc-ap-msg','Saving…');dcRequest('/api/v1/provisioning/ap',{ssid:$('dc-ap-ssid').value,password:$('dc-ap-password').value,ip:$('dc-ap-ip').value,enabled:$('dc-ap-enabled').value==='1'}).then(function(){setupMessage('dc-ap-msg','Saved. Rebooting…');}).catch(function(j){setupMessage('dc-ap-msg',j.error||'Could not save AP settings.',true);});});
   $('dc-load-logs').addEventListener('click',function(){dcFetchJson('/api/v1/system/logs',{cache:'no-store'}).then(function(j){$('dc-logs').textContent=(j.entries||[]).map(function(e){return '['+e.ms+' ms] '+e.text;}).join('\n');}).catch(function(){setupMessage('dc-system-msg','Could not load logs.',true);});});
-  $('dc-ota-upload').addEventListener('click',function(){var f=$('dc-ota-file').files[0];if(!f){setupMessage('dc-system-msg','Choose a firmware .bin first.',true);return;}setupMessage('dc-system-msg','Uploading and flashing… do not power off.');dcRequest('/api/v1/system/update',null,f).then(function(){setupMessage('dc-system-msg','Flashed. Rebooting…');}).catch(function(j){setupMessage('dc-system-msg',j.error||'Firmware update failed.',true);});});
+  var sFwBtn=$('s-fw-update'); if(sFwBtn) sFwBtn.addEventListener('click',function(){openProvisioning('dc-maintenance');});
+  $('dc-ota-upload').addEventListener('click',function(){var f=$('dc-ota-file').files[0];if(!f){setupMessage('dc-system-msg','Choose a firmware .bin first.',true);return;}otaUpload(f,false);});
+  /* XHR (not fetch) so upload.onprogress can show a live %; the device writes bytes to
+     flash as it receives them, so upload progress tracks flashing. On success, poll the
+     rebooting device and return to the dashboard. Presence-only auth needs a non-empty
+     header; a configured control token 403s until entered, then retries once. */
+  function otaTok(){return localStorage.getItem('db_tok')||'web';}
+  function otaUpload(f,retried){
+    var m=$('dc-system-msg');m.className='provision-msg';m.textContent='Uploading & flashing… 0% — do not power off.';
+    var up=false;var x=new XMLHttpRequest();x.open('POST','/api/v1/system/update');
+    x.setRequestHeader('X-DragonBreath-Auth',otaTok());
+    x.upload.onprogress=function(e){if(e.lengthComputable){var p=Math.round(e.loaded/e.total*100);m.textContent='Uploading & flashing… '+p+'% — do not power off.';}};
+    x.upload.onload=function(){up=true;m.textContent='Verifying image… — do not power off.';};
+    x.onload=function(){
+      if(x.status===403&&!retried){var t=prompt('Control token');if(t){localStorage.setItem('db_tok',t);otaUpload(f,true);return;}}
+      var j={};try{j=JSON.parse(x.responseText);}catch(e){}
+      if(j&&j.ok){m.textContent='Flashed \u2713 — rebooting into '+(j.version||'the new firmware')+'\u2026';otaWaitBack();}
+      else{m.className='provision-msg is-error';m.textContent='Update failed: '+((j&&j.error)||('HTTP '+x.status));}
+    };
+    x.onerror=function(){if(up){m.textContent='Flashed \u2713 — device rebooting, reconnecting\u2026';otaWaitBack();}else{m.className='provision-msg is-error';m.textContent='Update failed: connection lost during upload — try again.';}};
+    x.send(f);
+  }
+  function otaWaitBack(){var n=0;var iv=setInterval(function(){n++;fetch('/api/v2/info',{cache:'no-store'}).then(function(r){if(r.ok){clearInterval(iv);location.href='/';}}).catch(function(){});if(n>90){clearInterval(iv);location.href='/';}},2000);}
+  /* Update check: the product advertises its release repo via /api/v2/info.update
+     {repo, asset_prefix}. Ask GitHub for the latest release; if newer, show version +
+     expected SHA-256 + a download link. Release-asset bytes aren't CORS-readable, so the
+     user downloads then uploads via the picker above. Fails silent on dev builds/offline. */
+  var updateChecked=false;
+  function checkForUpdate(info){
+    if(updateChecked)return;var u=info&&info.update;if(!u||!u.repo)return;
+    var cur=info.firmware||'';var m=/^v?(\d+)\.(\d+)\.(\d+)$/.exec(cur);if(!m)return;updateChecked=true;
+    var c=[+m[1],+m[2],+m[3]];
+    fetch('https://api.github.com/repos/'+u.repo+'/releases/latest').then(function(r){return r.ok?r.json():null;}).then(function(d){
+      if(!d||!d.tag_name)return;var l=/^v?(\d+)\.(\d+)\.(\d+)/.exec(d.tag_name);if(!l)return;
+      var n=[+l[1],+l[2],+l[3]];
+      if(!(n[0]>c[0]||(n[0]==c[0]&&(n[1]>c[1]||(n[1]==c[1]&&n[2]>c[2])))))return;
+      var pfx=u.asset_prefix||'';
+      var a=(d.assets||[]).filter(function(x){return x.name.indexOf(pfx)===0&&/\.bin$/.test(x.name)&&x.name.indexOf('factory')<0;})[0];
+      var sha=a&&a.digest?String(a.digest).replace('sha256:',''):'';
+      var e=$('dc-update-notice');if(!e)return;
+      e.innerHTML='<b>'+d.tag_name+' available</b> (you\u2019re on '+cur+'). '+(a?'<a href="'+a.browser_download_url+'" target="_blank" rel="noopener">Download '+a.name+'</a> \u00b7 ':'')+'<a href="'+d.html_url+'" target="_blank" rel="noopener">release notes</a>'+(sha?'<br><small>Expected SHA-256: <code>'+sha+'</code> \u2014 verify, then upload it below.</small>':'<br><small>Download, then upload it below.</small>');
+      e.style.display='block';
+    }).catch(function(){});
+  }
   $('dc-factory-reset').addEventListener('click',function(){if(!confirm('Erase device settings and reboot?'))return;setupMessage('dc-system-msg','Resetting…');dcRequest('/api/v1/system/reset?confirm=factory-reset',{}).then(function(){setupMessage('dc-system-msg','Reset. Rebooting…');}).catch(function(j){setupMessage('dc-system-msg',j.error||'Factory reset failed.',true);});});
 
   /* Runtime family identity and feature gating. Older product firmware that does
@@ -2106,12 +2150,14 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
 
   /* Device info -> the Maintenance panel. (The old header brand/tooltip was
      removed; the firmware version is shown in the footer, populated in apply().) */
-  if(location.hash==='#setup'||location.pathname==='/setup'||location.pathname==='/fw'||location.pathname==='/console') openProvisioning();
+  if(location.pathname==='/fw') openProvisioning('dc-maintenance');
+  else if(location.hash==='#setup'||location.pathname==='/setup'||location.pathname==='/console') openProvisioning();
   else loadProvisioning().then(function(d){ if(d.network_mode==='ap') openProvisioning(); }).catch(function(){});
 
   fetch('/api/v2/info').then(function(r){ return r.json(); }).then(function(i){
     if(!i) return;
     applyDeviceInfo(i);
+    checkForUpdate(i);
     /* Inactive OTA slot: show what's there + offer to boot it (revert to stock, or
        roll back a version). Hidden when the slot is empty/unreadable. */
     var slot = i.inactive_slot;
