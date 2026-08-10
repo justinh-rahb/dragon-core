@@ -285,6 +285,112 @@ static esp_err_t logs_get(httpd_req_t *req)
     return send_json(req, root);
 }
 
+// ---- family-shared firmware console page ------------------------------------
+// Read-only /console served by core so every Dragon product gets it: streams the
+// raw ESP_LOGx ring from dc_evlog (auth-gated data). Compact inline shell; the
+// dashboard SPA is unaffected. Standalone route registered before the /* catch-all
+// so it wins. (/diag is deliberately NOT here — diagnostics are device-specific,
+// so each product owns its own /diag page.)
+
+// Raw firmware console ring (auth-gated), the data source for /console.
+static esp_err_t console_data_get(httpd_req_t *req)
+{
+    if (require_auth(req) != ESP_OK) return ESP_OK;
+    char *buf = malloc(DC_EVLOG_CONSOLE_BYTES + 1);
+    if (!buf) return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "out of memory");
+    size_t n = dc_evlog_console_snapshot(buf, DC_EVLOG_CONSOLE_BYTES + 1);
+    httpd_resp_set_type(req, "text/plain; charset=utf-8");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    esp_err_t err = httpd_resp_send(req, buf, n);
+    free(buf);
+    return err;
+}
+
+// Compact, theme-aware page shell for /console. Mirrors the
+// dc_ui token names so the page matches the SPA in light and dark.
+static const char PAGE_HEAD[] =
+    "<!doctype html><html lang=en><head><meta charset=utf-8>"
+    "<meta name=viewport content='width=device-width,initial-scale=1'>"
+    "<meta name=color-scheme content='light dark'><meta name=referrer content=no-referrer>"
+    "<link rel=icon href=/favicon.ico><style>"
+    ":root{color-scheme:light dark;"
+    "--text:light-dark(rgb(26 28 31),rgb(255 255 255));"
+    "--bg:light-dark(rgb(255 255 255),rgb(24 24 24));"
+    "--card:color-mix(in oklab,var(--text) 5%,transparent);"
+    "--accent:light-dark(rgb(51 156 255),rgb(131 195 255));"
+    "--accent-fg:light-dark(rgb(255 255 255),rgb(13 13 13));"
+    "--muted:light-dark(rgb(26 28 31 / 49.4%),rgb(255 255 255 / 49.8%));"
+    "--input:light-dark(rgb(26 28 31 / 11.8%),color-mix(in oklab,rgb(0 0 0) 10%,transparent));"
+    "--border:light-dark(rgb(26 28 31 / 8%),rgb(255 255 255 / 8.2%));"
+    "--bad:light-dark(rgb(226 85 7),rgb(255 133 73))}"
+    ":root[data-theme=light]{color-scheme:light}:root[data-theme=dark]{color-scheme:dark}"
+    "*{box-sizing:border-box}"
+    "body{margin:0;background:var(--bg);color:var(--text);"
+    "font:14px/1.4 -apple-system,system-ui,'Segoe UI',Roboto,sans-serif}"
+    ".wrap{max-width:28em;margin:0 auto;padding:16px}"
+    ".card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;margin:14px 0}"
+    ".card h2{margin:0 0 .3em;font-size:1rem;font-weight:600}"
+    "button.go{width:100%;padding:13px;margin-top:8px;border:0;border-radius:9px;background:var(--accent);color:var(--accent-fg);font-size:1rem;font-weight:600;cursor:pointer}"
+    "button.sec{width:100%;padding:10px;margin-top:12px;border:1px solid var(--border);border-radius:8px;background:transparent;color:var(--text);cursor:pointer}"
+    ".warn{color:var(--bad);font-weight:700}"
+    "small{color:var(--muted)}a{color:var(--accent)}</style>"
+    "<script>var _t=localStorage.getItem('db_theme');"
+    "if(_t==='light'||_t==='dark')document.documentElement.setAttribute('data-theme',_t);</script>"
+    "</head><body><div class=wrap>";
+
+static const char CONSOLE_BODY[] =
+    "<style>"
+    ".wrap{max-width:min(96vw,900px)}"
+    "#c-log{font:12px/1.4 ui-monospace,Menlo,Consolas,monospace;white-space:pre;tab-size:4;"
+    "background:var(--input);border-radius:8px;padding:10px 12px;"
+    "max-height:70vh;overflow:auto;margin:.4em 0}"
+    ".drow{display:flex;gap:8px}.drow button{flex:1;margin-top:0}"
+    "</style>"
+    "<div class=card><h2>Console</h2>"
+    "<div id=c-meta><small>firmware log\xE2\x80\xA6</small></div>"
+    "<pre id=c-log>loading\xE2\x80\xA6</pre>"
+    "<div class=drow>"
+    "<button type=button class=go id=c-dl>Download</button>"
+    "<button type=button class=sec id=c-pause>Pause</button>"
+    "</div></div>"
+    "<p style='text-align:center'><small><a href='/'>\xE2\x86\x90 Back to status</a></small></p>"
+    "<script>"
+    "function tok(){var t=localStorage.getItem('db_tok');"
+    "if(!t){t=prompt('Control token')||'';if(t)localStorage.setItem('db_tok',t);}return t;}"
+    "function hdr(){return {'X-DragonBreath-Auth':tok()};}"
+    "(function(){"
+    "var paused=false,last='';"
+    "function $(i){return document.getElementById(i);}"
+    "function load(){"
+    "fetch('/api/v1/system/console',{cache:'no-store',headers:hdr()}).then(function(r){"
+    "if(r.status==403){localStorage.removeItem('db_tok');"
+    "$('c-meta').innerHTML='<small class=warn>Auth rejected \\u2014 reload and re-enter the control token.</small>';return null;}"
+    "return r.text();"
+    "}).then(function(t){"
+    "if(t==null)return;t=t.replace(/\\x1b\\[[0-9;]*m/g,'');last=t;var pre=$('c-log');"
+    "var atEnd=pre.scrollTop+pre.clientHeight>=pre.scrollHeight-6;"
+    "pre.textContent=t||'(no log captured yet)';"
+    "if(atEnd)pre.scrollTop=pre.scrollHeight;"
+    "$('c-meta').innerHTML='<small>'+t.length+' bytes \\u00b7 '+(paused?'paused':'auto-refresh 2s')+'</small>';"
+    "}).catch(function(){});"
+    "}"
+    "$('c-dl').addEventListener('click',function(){"
+    "var b=new Blob([last||''],{type:'text/plain'});"
+    "var a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='dragon-console.txt';a.click();"
+    "setTimeout(function(){URL.revokeObjectURL(a.href);},1000);"
+    "});"
+    "$('c-pause').addEventListener('click',function(){paused=!paused;this.textContent=paused?'Resume':'Pause';if(!paused)load();});"
+    "load();setInterval(function(){if(!paused)load();},2000);"
+    "})();</script></body></html>";
+
+static esp_err_t console_page(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "text/html; charset=utf-8");
+    httpd_resp_send_chunk(req, PAGE_HEAD, HTTPD_RESP_USE_STRLEN);
+    httpd_resp_send_chunk(req, CONSOLE_BODY, HTTPD_RESP_USE_STRLEN);
+    return httpd_resp_send_chunk(req, NULL, 0);
+}
+
 static esp_err_t operation_error(httpd_req_t *req, esp_err_t err,
                                  const char *message)
 {
@@ -436,11 +542,13 @@ esp_err_t dc_portal_start(const dc_portal_config_t *config)
         { .uri = "/api/v1/provisioning/ap", .method = HTTP_POST, .handler = ap_post },
         { .uri = "/api/v1/provisioning/product", .method = HTTP_POST, .handler = product_post },
         { .uri = "/api/v1/system/logs", .method = HTTP_GET, .handler = logs_get },
+        { .uri = "/api/v1/system/console", .method = HTTP_GET, .handler = console_data_get },
         { .uri = "/api/v1/system/update", .method = HTTP_POST, .handler = update_post },
         // Compatibility alias used by existing DragonBreath/DragonVent clients.
         { .uri = "/update", .method = HTTP_POST, .handler = update_post },
         { .uri = "/api/v1/system/reset", .method = HTTP_POST, .handler = reset_post },
         { .uri = "/setup", .method = HTTP_GET, .handler = spa_get },
+        { .uri = "/console", .method = HTTP_GET, .handler = console_page },
         { .uri = "/", .method = HTTP_GET, .handler = spa_get },
     };
     for (size_t i = 0; i < sizeof(builtins) / sizeof(builtins[0]); ++i) {
