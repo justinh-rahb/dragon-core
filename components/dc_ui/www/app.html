@@ -1120,6 +1120,10 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
   function renderProductSetup(spec){
     var host=$('dc-product-setup'); host.replaceChildren();
     if(!spec||!Array.isArray(spec.sections))return;
+    /* A section may carry visible_when:{field,value|values}; it shows only when that
+       field's current value matches. Sections without it always render, so this stays
+       backward-compatible. Lets a product reveal only the selected control source. */
+    var conds=[];
     spec.sections.forEach(function(section){
       var card=document.createElement('article');card.className='provision-card';
       var title=document.createElement('h3');title.textContent=section.title||'Product settings';card.appendChild(title);
@@ -1130,7 +1134,16 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
         var values={};card.querySelectorAll('[data-setup-key]').forEach(function(el){values[el.dataset.setupKey]=el.type==='number'?Number(el.value):(el.value);});
         setupMessage('dc-system-msg','Saving…');dcRequest('/api/v1/provisioning/product',{values:values}).then(function(j){setupMessage('dc-system-msg',j.message||'Settings saved.');loadProvisioning();}).catch(function(j){setupMessage('dc-system-msg',j.error||'Could not save settings.',true);});
       });actions.appendChild(save);card.appendChild(actions);host.appendChild(card);
+      var vw=section.visible_when;
+      if(vw&&vw.field){var vals=Array.isArray(vw.values)?vw.values:[vw.value];conds.push({card:card,field:vw.field,values:vals.map(String)});}
     });
+    if(conds.length){
+      var val=function(k){var el=host.querySelector('[data-setup-key=\"'+k+'\"]');return el?String(el.value):null;};
+      var applyVis=function(){conds.forEach(function(c){var v=val(c.field);c.card.hidden=(v!==null&&c.values.indexOf(v)<0);});};
+      var seen={};conds.forEach(function(c){seen[c.field]=1;});
+      Object.keys(seen).forEach(function(k){var el=host.querySelector('[data-setup-key=\"'+k+'\"]');if(el)el.addEventListener('change',applyVis);});
+      applyVis();
+    }
   }
   function applyProvisioning(d){
     setupData=d;product=d.product||product;u('dc-setup-title',(d.display_name||'Dragon Device')+' setup');u('dc-setup-mode',d.network_mode==='ap'?'Connected to the device setup network':'Managing this device on your LAN');
