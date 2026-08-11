@@ -133,7 +133,10 @@ static void parse_report(const char *json)
     }
     if (got_tgt)  s_status.bed_target = bedtgt;
     if (got_cham) s_status.chamber_temp = cham;
-    if (got_gs)   s_status.printing = dc_bambu_gcode_active(gs);   // keep prior if a delta omits it
+    if (got_gs) {
+        s_status.printing = dc_bambu_gcode_active(gs);   // keep prior if a delta omits it
+        s_status.error    = (strcmp(gs, "FAILED") == 0); // Bambu's print-failed state
+    }
     // Tri-state: PRESENT updates the filament; EMPTY (unload / print end / no spool)
     // CLEARS it so a stale zone is never applied; ABSENT (a delta that simply omits
     // the AMS/tray block) leaves the last known value untouched.
