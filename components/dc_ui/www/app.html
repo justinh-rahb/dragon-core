@@ -312,6 +312,11 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
 .light-row input[type=range]{ inline-size: 55%; }
 .light-row select{ font: inherit; padding: 3px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--background); color: inherit; }
 .light-range input[type=number]{ inline-size: 52px; }
+.fil-card{ display:flex; flex-direction:column; gap:8px; margin-top:12px; padding-top:12px; border-top:1px solid var(--border); }
+.fil-row{ display:flex; align-items:center; gap:8px; }
+.fil-row input[type=text]{ flex:1; min-width:0; font:inherit; padding:4px 7px; border:1px solid var(--border); border-radius:6px; background:var(--background); color:inherit; text-transform:uppercase; }
+.fil-row label{ display:flex; align-items:center; gap:4px; font-size:12px; color:var(--muted-foreground); white-space:nowrap; }
+.fil-row .fil-del{ background:none; border:1px solid var(--border); border-radius:6px; color:var(--muted-foreground); cursor:pointer; inline-size:28px; block-size:28px; line-height:1; }
 .log-list{ display: flex; flex-direction: column; gap: 2px; max-height: 220px;
   overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
 .log-list .log-row{ display: flex; gap: 8px; padding: 2px 0; border-bottom: 1px solid var(--border); }
@@ -1013,6 +1018,15 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
         </div>
         <button class="btn btn-primary btn-block" type="button" id="dv-auto-save"><svg class="icon"><use href="#i-refresh"/></svg> Save &amp; enable Auto</button>
         <div class="mode-feedback" id="dv-auto-msg" role="status" aria-live="polite"></div>
+
+        <div class="fil-card">
+          <h3>Filament rules</h3>
+          <p class="set-note">During a print, seal the chamber for these filaments and vent for everything else. Matched by name prefix (PLA matches PLA+). Detected now: <strong id="dv-fil-current">&mdash;</strong></p>
+          <div id="dv-fil-list"></div>
+          <button class="btn btn-sm" type="button" id="dv-fil-add"><svg class="icon"><use href="#i-plus"/></svg> Add filament</button>
+          <button class="btn btn-primary btn-block" type="button" id="dv-fil-save"><svg class="icon"><use href="#i-refresh"/></svg> Save filament rules</button>
+          <div class="mode-feedback" id="dv-fil-msg" role="status" aria-live="polite"></div>
+        </div>
       </section>
 
       <section class="vent-view vent-settings" data-vent-content="lighting">
@@ -1555,6 +1569,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
       t.setAttribute('aria-selected', String(t===tab));
     });
     if(page==='lighting') loadLighting();
+    if(page==='auto') loadFilament();
   }
 
   function rgbToHex(a){ function h(n){ return ('0'+((n||0)&255).toString(16)).slice(-2); }
@@ -1575,6 +1590,22 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
       $('dv-light-speed').value=c.speed;
       $('dv-light-useerror').checked=!!c.use_error;
       $('dv-light-error').value=rgbToHex(c.error);
+    }).catch(function(){});
+  }
+  function filRow(name, seal){
+    var d=document.createElement('div'); d.className='fil-row';
+    d.innerHTML='<input type="text" class="fil-name" maxlength="11" placeholder="e.g. ABS">'
+      +'<label><input type="checkbox" class="fil-seal"> Seal</label>'
+      +'<button type="button" class="fil-del" aria-label="Remove">×</button>';
+    d.querySelector('.fil-name').value=name||'';
+    d.querySelector('.fil-seal').checked=!!seal;
+    d.querySelector('.fil-del').addEventListener('click',function(){ d.remove(); });
+    return d;
+  }
+  function loadFilament(){
+    fetch('/api/v2/filament',{cache:'no-store'}).then(function(r){return r.json();}).then(function(c){
+      var list=$('dv-fil-list'); list.innerHTML='';
+      (c.rules||[]).forEach(function(rule){ list.appendChild(filRow(rule.name, rule.seal)); });
     }).catch(function(){});
   }
   function ventTargetLabel(v){
@@ -1601,6 +1632,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     u('dv-printer', p.state||'unknown');
     u('dv-bed', p.bed_temperature_c==null?'--':Number(p.bed_temperature_c).toFixed(1)+' °C');
     u('dv-material', p.material||'--');
+    u('dv-fil-current', p.material||'—');
     u('dv-groups', String(v.active_groups||0)+(running?' · moving':''));
     u('dv-version', s.firmware||'--');
     u('dv-footer-version', s.firmware||'—');
@@ -2299,6 +2331,18 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     ventPost('/api/v2/lighting',body)
       .then(function(){ ventFlash('dv-light-msg','Lighting saved.','is-ok'); })
       .catch(function(j){ ventFlash('dv-light-msg',(j&&j.message)||'Save failed.','is-error'); });
+  });
+  $('dv-fil-add').addEventListener('click',function(){ $('dv-fil-list').appendChild(filRow('', true)); });
+  $('dv-fil-save').addEventListener('click',function(){
+    var rules=[];
+    $('dv-fil-list').querySelectorAll('.fil-row').forEach(function(row){
+      var name=row.querySelector('.fil-name').value.trim();
+      if(name) rules.push({name:name, seal:row.querySelector('.fil-seal').checked});
+    });
+    ventFlash('dv-fil-msg','Saving…');
+    ventPost('/api/v2/filament',{rules:rules})
+      .then(function(){ ventFlash('dv-fil-msg','Filament rules saved.','is-ok'); })
+      .catch(function(j){ ventFlash('dv-fil-msg',(j&&j.message)||'Save failed.','is-error'); });
   });
   ['dv-open-range','dv-close-range'].forEach(function(id){
     $(id).addEventListener('input',function(){ u(id.replace('-range','-value'),this.value+' °C'); });

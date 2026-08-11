@@ -47,11 +47,15 @@ static char  s_ps_state[16]     = "";   // print_stats.state
 static char  s_wh_state[16]     = "";   // webhooks.state
 static float s_last_progress    = 0.0f;
 
-// Material has two sources; save_variables (explicit user opt-in) wins over the
-// slicer's filament_type from the g-code metadata (automatic, no macro needed).
-static char  s_mat_sv[16]       = "";   // save_variables.variables.material
-static char  s_mat_meta[16]     = "";   // metadata filament_type
-static char  s_meta_file[64]    = "";   // filename we last requested metadata for
+// Material sources, in priority order: an explicit save_variables value (user
+// opt-in) wins; otherwise the slicer's per-tool filament_type list from the
+// g-code metadata, indexed by the active tool (toolhead.extruder) so a
+// multi-material printer reports the filament that's actually printing.
+static char  s_mat_sv[16]       = "";      // save_variables.variables.material
+static char  s_fil_list[8][12]  = {{0}};   // per-tool filament_type from metadata
+static int   s_fil_count        = 0;
+static int   s_active_tool      = 0;       // toolhead.extruder index (extruder=0, extruder1=1, ...)
+static char  s_meta_file[64]    = "";      // filename we last requested metadata for
 
 static void send_metadata_request(const char *filename);
 static void maybe_fetch_metadata(void);
@@ -173,11 +177,20 @@ static void copy_upper(char *dst, size_t dst_sz, const char *src)
     dst[i] = '\0';
 }
 
-// Publish the effective material: an explicit save_variables value wins, else the
-// slicer's filament_type from g-code metadata. Caller holds s_lock.
+// Publish the effective material: explicit save_variables wins; else the active
+// tool's filament from the metadata list (clamped, so a single-tool list or an
+// out-of-range tool still resolves). Caller holds s_lock.
 static void recompute_material(void)
 {
-    const char *src = s_mat_sv[0] ? s_mat_sv : s_mat_meta;
+    const char *src = "";
+    if (s_mat_sv[0]) {
+        src = s_mat_sv;
+    } else if (s_fil_count > 0) {
+        int idx = s_active_tool;
+        if (idx < 0) idx = 0;
+        if (idx >= s_fil_count) idx = s_fil_count - 1;
+        src = s_fil_list[idx];
+    }
     strncpy(s_status.material, src, sizeof(s_status.material) - 1);
     s_status.material[sizeof(s_status.material) - 1] = '\0';
 }
@@ -240,6 +253,19 @@ static void merge_status_object(cJSON *status)
         if (cJSON_IsNumber(t)) s_status.extruder_temp = (float)t->valuedouble;
     }
 
+    // Active tool: toolhead.extruder is "extruder" (T0), "extruder1" (T1), ... On
+    // a multi-tool printer this picks which slot's filament is actually printing.
+    cJSON *th = cJSON_GetObjectItemCaseSensitive(status, "toolhead");
+    if (cJSON_IsObject(th)) {
+        cJSON *ae = cJSON_GetObjectItemCaseSensitive(th, "extruder");
+        if (cJSON_IsString(ae) && strncmp(ae->valuestring, "extruder", 8) == 0) {
+            int idx = 0;
+            for (const char *d = ae->valuestring + 8; *d >= '0' && *d <= '9'; ++d) idx = idx * 10 + (*d - '0');
+            s_active_tool = idx;
+            recompute_material();
+        }
+    }
+
     // Chamber: subscribed as "heater_generic chamber". Not every install has
     // it — cJSON just returns NULL and we leave chamber_temp as NaN.
     cJSON *chamber = cJSON_GetObjectItemCaseSensitive(status, "heater_generic chamber");
@@ -294,23 +320,34 @@ static void handle_frame(const char *json, size_t len)
             maybe_fetch_metadata();   // a print may already be loaded
             return;
         }
-        // server.files.metadata reply: {"result":{"filament_type":"PLA",...}}.
-        // filament_type can be comma/semicolon-separated for multi-material — take
-        // the first entry; the save_variables value (if any) still wins.
+        // server.files.metadata reply: {"result":{"filament_type":"PLA;ABS;..."}}.
+        // Split the comma/semicolon-separated per-tool list; recompute_material
+        // then picks the active tool's entry. save_variables (if any) still wins.
         cJSON *ft = cJSON_GetObjectItemCaseSensitive(result, "filament_type");
         if (cJSON_IsString(ft) && ft->valuestring[0]) {
-            char first[16];
-            size_t k = 0;
-            for (const char *p = ft->valuestring; *p && *p != ',' && *p != ';' && k < sizeof(first) - 1; ++p) {
-                first[k++] = *p;
-            }
-            while (k > 0 && first[k - 1] == ' ') --k;
-            first[k] = '\0';
             xSemaphoreTake(s_lock, portMAX_DELAY);
-            copy_upper(s_mat_meta, sizeof(s_mat_meta), first);
+            s_fil_count = 0;
+            const char *p = ft->valuestring;
+            const int max_tools = (int)(sizeof(s_fil_list) / sizeof(s_fil_list[0]));
+            while (*p && s_fil_count < max_tools) {
+                char *dst = s_fil_list[s_fil_count];
+                size_t k = 0;
+                while (*p && *p != ',' && *p != ';' && k < sizeof(s_fil_list[0]) - 1) {
+                    dst[k++] = (char)toupper((unsigned char)*p);
+                    ++p;
+                }
+                while (k > 0 && dst[k - 1] == ' ') --k;   // trim trailing space
+                dst[k] = '\0';
+                if (dst[0]) ++s_fil_count;
+                if (*p == ',' || *p == ';') ++p;
+            }
             recompute_material();
+            char mat[16];
+            strncpy(mat, s_status.material, sizeof(mat) - 1);
+            mat[sizeof(mat) - 1] = '\0';
+            int cnt = s_fil_count, tool = s_active_tool;
             xSemaphoreGive(s_lock);
-            ESP_LOGI(TAG, "metadata filament_type=%s", first);
+            ESP_LOGI(TAG, "metadata: %d filament(s), active tool %d -> %s", cnt, tool, mat);
         }
         cJSON_Delete(root);
         return;
@@ -377,6 +414,7 @@ static void send_subscribe(void)
             "\"virtual_sdcard\":null,"
             "\"heater_bed\":null,"
             "\"extruder\":null,"
+            "\"toolhead\":null,"
             "\"heater_generic chamber\":null,"
             "\"save_variables\":null"
         "}},"
