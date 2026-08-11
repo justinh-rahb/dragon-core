@@ -1232,6 +1232,52 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
       var title=document.createElement('h3');title.textContent=section.title||'Product settings';card.appendChild(title);
       if(section.description){var note=document.createElement('p');note.className='set-note';note.textContent=section.description;card.appendChild(note);}
       var grid=document.createElement('div');grid.className='provision-grid';(section.fields||[]).forEach(function(f){grid.appendChild(fieldControl(f));});card.appendChild(grid);
+      /* Optional LAN discovery: a section may carry discovery:{scan,endpoint,list,label,fill}.
+         Discovery is user-initiated only — nothing scans until Search is clicked or
+         this section is revealed while still unconfigured. Search POSTs `scan` to
+         start a short device-side scan, then polls `endpoint` until it reports
+         scanning:false. Picking a result copies each discovered property into the
+         mapped setup field (fill: discoveredKey -> field key). */
+      if(section.discovery&&(section.discovery.scan||section.discovery.endpoint)){
+        (function(disc){
+          var drow=document.createElement('div');drow.className='provision-actions';
+          var scan=document.createElement('button');scan.type='button';scan.className='btn';var scanLabel=disc.label||'Search for printers';scan.textContent=scanLabel;
+          var pick=document.createElement('select');pick.className='provision-discovery-pick';var ph=document.createElement('option');ph.value='';ph.textContent='No results yet';pick.appendChild(ph);
+          drow.appendChild(scan);drow.appendChild(pick);card.appendChild(drow);
+          var busy=false;
+          function fillPicker(items,scanning){
+            pick._items=items;pick.replaceChildren();
+            var o0=document.createElement('option');o0.value='';
+            o0.textContent=items.length?('Found '+items.length+' — choose one'):(scanning?'Searching…':'None found — try again');
+            pick.appendChild(o0);
+            items.forEach(function(it,idx){var o=document.createElement('option');o.value=String(idx);o.textContent=(it.name||it.serial||it.host||('#'+idx))+(it.host?(' · '+it.host):'')+(it.model?(' · '+it.model):'');pick.appendChild(o);});
+          }
+          function stop(){busy=false;scan.disabled=false;scan.textContent=scanLabel;}
+          function poll(deadline){
+            dcFetchJson(disc.endpoint,{cache:'no-store'}).then(function(j){
+              var items=(j&&j[disc.list||'items'])||[];var scanning=!!(j&&j.scanning);
+              fillPicker(items,scanning);
+              if(scanning&&Date.now()<deadline){setTimeout(function(){poll(deadline);},1200);}else{stop();}
+            }).catch(stop);
+          }
+          function runScan(){
+            if(busy)return;busy=true;scan.disabled=true;scan.textContent='Searching…';fillPicker([],true);
+            var start=disc.scan?dcRequest(disc.scan,{}):Promise.resolve();
+            start.then(function(){poll(Date.now()+9000);}).catch(stop);
+          }
+          scan.addEventListener('click',runScan);
+          pick.addEventListener('change',function(){
+            var it=(pick._items||[])[Number(pick.value)];if(!it)return;
+            Object.keys(disc.fill||{}).forEach(function(srcKey){var fk=disc.fill[srcKey];var el=card.querySelector('[data-setup-key=\"'+fk+'\"]');if(el&&it[srcKey]!=null)el.value=it[srcKey];});
+          });
+          /* Called when the section is revealed: scan once if the primary field
+             (e.g. host) is still empty — an unconfigured setup the user just opened. */
+          card._autoScan=function(){
+            var hk=disc.fill&&disc.fill.host;var hostEl=hk?card.querySelector('[data-setup-key=\"'+hk+'\"]'):null;
+            if(hostEl&&!hostEl.value&&!busy&&!card._autoDone){card._autoDone=true;runScan();}
+          };
+        })(section.discovery);
+      }
       var actions=document.createElement('div');actions.className='provision-actions';var save=document.createElement('button');save.className='btn btn-primary';save.type='button';save.textContent=section.action_label||'Save settings';
       save.addEventListener('click',function(){
         var values={};card.querySelectorAll('[data-setup-key]').forEach(function(el){values[el.dataset.setupKey]=el.type==='number'?Number(el.value):(el.value);});
@@ -1242,7 +1288,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     });
     if(conds.length){
       var val=function(k){var el=host.querySelector('[data-setup-key=\"'+k+'\"]');return el?String(el.value):null;};
-      var applyVis=function(){conds.forEach(function(c){var v=val(c.field);c.card.hidden=(v!==null&&c.values.indexOf(v)<0);});};
+      var applyVis=function(){conds.forEach(function(c){var v=val(c.field);var hide=(v!==null&&c.values.indexOf(v)<0);c.card.hidden=hide;if(hide){c.card._autoDone=false;}else if(c.card._autoScan){c.card._autoScan();}});};
       var seen={};conds.forEach(function(c){seen[c.field]=1;});
       Object.keys(seen).forEach(function(k){var el=host.querySelector('[data-setup-key=\"'+k+'\"]');if(el)el.addEventListener('change',applyVis);});
       applyVis();
