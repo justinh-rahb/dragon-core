@@ -1016,6 +1016,15 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
           </dl>
         </article>
         <article class="set-card">
+          <h3>Vent calibration</h3>
+          <p class="set-note">Re-learn this unit's open and closed endstop positions. The vent sweeps fully open, then fully closed, and stores the result. Run this if the vent stops seating cleanly or after swapping hardware.</p>
+          <dl class="set-info" id="dv-cal-readout">
+            <div><dt>Endstops</dt><dd id="dv-cal-state">--</dd></div>
+          </dl>
+          <button class="btn btn-primary btn-block" type="button" id="dv-recalibrate"><svg class="icon"><use href="#i-refresh"/></svg> Recalibrate vent</button>
+          <div class="mode-feedback" id="dv-cal-msg" role="status" aria-live="polite"></div>
+        </article>
+        <article class="set-card">
           <h3>Network &amp; printer source</h3>
           <p class="set-note">Wi-Fi credentials, Moonraker or Bambu connection, fallback AP, firmware update, logs and factory reset remain available in the recovery-safe setup page.</p>
           <a class="btn btn-primary btn-block" href="#setup" data-open-provisioning><svg class="icon"><use href="#i-settings"/></svg> Open device setup</a>
@@ -1070,6 +1079,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
 (function(){
   var app = document.querySelector('.app');
   var ventApp = document.getElementById('dv-app');
+  var ventWasCalibrating = false;
   var product = 'dragonbreath';
   var $ = function(id){ return document.getElementById(id); };
   function u(id, v){ var e=$(id); if(e) e.textContent = v; }
@@ -1548,10 +1558,26 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     ['dv-open','dv-manual-open'].forEach(function(id){ var b=$(id); if(b) b.setAttribute('aria-pressed',String(s.mode==='manual'&&target==='open')); });
     ['dv-close','dv-manual-close'].forEach(function(id){ var b=$(id); if(b) b.setAttribute('aria-pressed',String(s.mode==='manual'&&target==='closed')); });
     $('dv-auto').setAttribute('aria-pressed',String(s.mode==='auto'));
+    // Vent calibration readout + button state (settings page).
+    var cal=v.calibration||[], calibrating=!!v.calibrating;
+    // Announce completion on the true->false edge, from whichever state source
+    // (poll / SSE / heartbeat) observes it first.
+    if(ventWasCalibrating && !calibrating){ ventFlash('dv-cal-msg','Calibration complete — endstops learned.','is-ok'); }
+    ventWasCalibrating=calibrating;
+    var learned=cal.filter(function(c){ return c && c.open_mv>0 && c.closed_mv>0; }).length;
+    u('dv-cal-state', calibrating ? 'Calibrating…'
+      : (v.active_groups ? (learned+' / '+v.active_groups+' group'+(v.active_groups===1?'':'s')+' learned') : '--'));
+    var rc=$('dv-recalibrate');
+    if(rc){ rc.disabled=calibrating;
+      rc.innerHTML='<svg class="icon"><use href="#i-refresh"/></svg> '+(calibrating?'Calibrating…':'Recalibrate vent'); }
     ventSetConn(true);
   }
   function ventPost(path, body){
-    return fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(function(r){
+    // hdr() carries the control-token auth header (X-Dragon-Auth). Without it the
+    // device's presence-only CSRF gate rejects every command with 403, so the vent
+    // buttons appeared inert — they posted, but the device dropped the command and
+    // nothing drove.
+    return fetch(path,{method:'POST',headers:hdr(),body:JSON.stringify(body)}).then(function(r){
       return r.json().catch(function(){return {};}).then(function(j){
         if(j.state) applyVent(j.state);
         if(!r.ok) throw j;
@@ -2180,6 +2206,27 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
   $('dv-manual-open').addEventListener('click',function(){ doVentManual('open','dv-manual-msg'); });
   $('dv-manual-close').addEventListener('click',function(){ doVentManual('closed','dv-manual-msg'); });
   $('dv-auto').addEventListener('click',function(){ ventCommand('auto').catch(function(){}); });
+  $('dv-recalibrate').addEventListener('click',function(){
+    ventFlash('dv-cal-msg','Recalibrating — the vent will sweep open, then closed…');
+    ventCommand('calibrate')
+      .then(function(){
+        // The POST reply already confirmed the sweep started (calibrating=true),
+        // so just poll state until it clears, then confirm. Read completion from
+        // the raw state FIRST so a throw in applyVent() can't swallow it.
+        var n=0;
+        var iv=setInterval(function(){
+          n++;
+          fetch('/api/v2/state',{cache:'no-store'}).then(function(r){return r.json();}).then(function(s){
+            if(!s||!s.vent) return;
+            var done=!s.vent.calibrating;
+            try{ applyVent(s); }catch(e){}
+            if(done){ clearInterval(iv); ventFlash('dv-cal-msg','Calibration complete — endstops learned.','is-ok'); }
+          }).catch(function(){});
+          if(n>25){ clearInterval(iv); }   // ~20 s safety net
+        },800);
+      })
+      .catch(function(j){ ventFlash('dv-cal-msg',(j&&j.message)||'Calibration failed.','is-error'); });
+  });
   ['dv-open-range','dv-close-range'].forEach(function(id){
     $(id).addEventListener('input',function(){ u(id.replace('-range','-value'),this.value+' °C'); });
   });
