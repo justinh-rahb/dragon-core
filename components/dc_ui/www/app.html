@@ -1035,16 +1035,23 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
           <p class="set-note">Strip-LED color. Default: blue when open (cool), red when closed (hot). Optionally show a color while printing, or blend open&rarr;closed by bed temperature.</p>
           <div class="light-row"><label for="dv-light-enabled">Lighting on</label><input type="checkbox" id="dv-light-enabled"></div>
           <div class="light-row"><label for="dv-light-bright">Brightness</label><input type="range" id="dv-light-bright" min="0" max="255"></div>
+          <div class="light-row"><label for="dv-light-mode">Color follows</label><select id="dv-light-mode"><option value="0">Vent state</option><option value="1">Printer status</option></select></div>
           <div class="light-row"><label for="dv-light-open">Open color (cool)</label><input type="color" id="dv-light-open"></div>
           <div class="light-row"><label for="dv-light-closed">Closed color (hot)</label><input type="color" id="dv-light-closed"></div>
           <div class="light-row"><label for="dv-light-useprint">Show a color while printing</label><input type="checkbox" id="dv-light-useprint"></div>
           <div class="light-row"><label for="dv-light-print">Printing color</label><input type="color" id="dv-light-print"></div>
           <div class="light-row"><label for="dv-light-usetemp">Temperature gradient</label><input type="checkbox" id="dv-light-usetemp"></div>
           <div class="light-row"><label>Gradient range &deg;C</label><span class="light-range"><input type="number" id="dv-light-tmin" min="0" max="120" step="1"> &ndash; <input type="number" id="dv-light-tmax" min="0" max="120" step="1"></span></div>
-          <div class="light-row"><label for="dv-light-effect">Effect</label><select id="dv-light-effect"><option value="0">Solid</option><option value="1">Cycle</option><option value="2">Rainbow</option><option value="3">Breathe</option></select></div>
+          <div class="light-row"><label for="dv-light-effect">Effect</label><select id="dv-light-effect"><option value="0">Solid</option><option value="1">Cycle</option><option value="2">Rainbow</option><option value="3">Breathe</option><option value="4">Strobe</option><option value="5">Wave</option><option value="6">Marquee</option></select></div>
           <div class="light-row"><label for="dv-light-speed">Effect speed</label><input type="range" id="dv-light-speed" min="0" max="255"></div>
+          <div class="light-row"><label for="dv-light-reverse">Reverse LED direction</label><input type="checkbox" id="dv-light-reverse"></div>
           <div class="light-row"><label for="dv-light-useerror">Flash on print error</label><input type="checkbox" id="dv-light-useerror"></div>
           <div class="light-row"><label for="dv-light-error">Error color</label><input type="color" id="dv-light-error"></div>
+          <p class="set-note">Printer-status colors (used when <em>Color follows</em> is <em>Printer status</em>). Printing uses the Printing color above; Error uses the Error color above.</p>
+          <div class="light-row"><label for="dv-light-idle">Idle</label><input type="color" id="dv-light-idle"></div>
+          <div class="light-row"><label for="dv-light-prep">Preparing</label><input type="color" id="dv-light-prep"></div>
+          <div class="light-row"><label for="dv-light-paused">Paused</label><input type="color" id="dv-light-paused"></div>
+          <div class="light-row"><label for="dv-light-complete">Completed</label><input type="color" id="dv-light-complete"></div>
           <button class="btn btn-primary btn-block" type="button" id="dv-light-save"><svg class="icon"><use href="#i-bulb"/></svg> Save lighting</button>
           <div class="mode-feedback" id="dv-light-msg" role="status" aria-live="polite"></div>
         </article>
@@ -1590,6 +1597,12 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
       $('dv-light-speed').value=c.speed;
       $('dv-light-useerror').checked=!!c.use_error;
       $('dv-light-error').value=rgbToHex(c.error);
+      $('dv-light-mode').value=String(c.mode||0);
+      $('dv-light-idle').value=rgbToHex(c.idle);
+      $('dv-light-prep').value=rgbToHex(c.prep);
+      $('dv-light-paused').value=rgbToHex(c.paused);
+      $('dv-light-complete').value=rgbToHex(c.complete);
+      $('dv-light-reverse').checked=!!c.reverse;
     }).catch(function(){});
   }
   function filRow(name, seal){
@@ -2325,7 +2338,13 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
       effect: parseInt($('dv-light-effect').value,10)||0,
       speed: parseInt($('dv-light-speed').value,10)||0,
       use_error: $('dv-light-useerror').checked,
-      error: hexToRgb($('dv-light-error').value)
+      error: hexToRgb($('dv-light-error').value),
+      mode: parseInt($('dv-light-mode').value,10)||0,
+      idle: hexToRgb($('dv-light-idle').value),
+      prep: hexToRgb($('dv-light-prep').value),
+      paused: hexToRgb($('dv-light-paused').value),
+      complete: hexToRgb($('dv-light-complete').value),
+      reverse: $('dv-light-reverse').checked
     };
     ventFlash('dv-light-msg','Saving…');
     ventPost('/api/v2/lighting',body)
