@@ -310,6 +310,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
 .light-row > label:first-child{ color: var(--muted-foreground); }
 .light-row input[type=color]{ inline-size: 44px; block-size: 26px; padding: 0; border: 1px solid var(--border); border-radius: 6px; background: none; cursor: pointer; }
 .light-row input[type=range]{ inline-size: 55%; }
+.light-row select{ font: inherit; padding: 3px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--background); color: inherit; }
 .light-range input[type=number]{ inline-size: 52px; }
 .log-list{ display: flex; flex-direction: column; gap: 2px; max-height: 220px;
   overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
@@ -1026,6 +1027,10 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
           <div class="light-row"><label for="dv-light-print">Printing color</label><input type="color" id="dv-light-print"></div>
           <div class="light-row"><label for="dv-light-usetemp">Temperature gradient</label><input type="checkbox" id="dv-light-usetemp"></div>
           <div class="light-row"><label>Gradient range &deg;C</label><span class="light-range"><input type="number" id="dv-light-tmin" min="0" max="120" step="1"> &ndash; <input type="number" id="dv-light-tmax" min="0" max="120" step="1"></span></div>
+          <div class="light-row"><label for="dv-light-effect">Effect</label><select id="dv-light-effect"><option value="0">Solid</option><option value="1">Cycle</option><option value="2">Rainbow</option><option value="3">Breathe</option></select></div>
+          <div class="light-row"><label for="dv-light-speed">Effect speed</label><input type="range" id="dv-light-speed" min="0" max="255"></div>
+          <div class="light-row"><label for="dv-light-useerror">Flash on print error</label><input type="checkbox" id="dv-light-useerror"></div>
+          <div class="light-row"><label for="dv-light-error">Error color</label><input type="color" id="dv-light-error"></div>
           <button class="btn btn-primary btn-block" type="button" id="dv-light-save"><svg class="icon"><use href="#i-bulb"/></svg> Save lighting</button>
           <div class="mode-feedback" id="dv-light-msg" role="status" aria-live="polite"></div>
         </article>
@@ -1566,6 +1571,10 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
       $('dv-light-usetemp').checked=!!c.use_temp;
       $('dv-light-tmin').value=c.temp_min_c;
       $('dv-light-tmax').value=c.temp_max_c;
+      $('dv-light-effect').value=String(c.effect||0);
+      $('dv-light-speed').value=c.speed;
+      $('dv-light-useerror').checked=!!c.use_error;
+      $('dv-light-error').value=rgbToHex(c.error);
     }).catch(function(){});
   }
   function ventTargetLabel(v){
@@ -2280,7 +2289,11 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
       use_printing: $('dv-light-useprint').checked,
       use_temp: $('dv-light-usetemp').checked,
       temp_min_c: parseInt($('dv-light-tmin').value,10)||0,
-      temp_max_c: parseInt($('dv-light-tmax').value,10)||0
+      temp_max_c: parseInt($('dv-light-tmax').value,10)||0,
+      effect: parseInt($('dv-light-effect').value,10)||0,
+      speed: parseInt($('dv-light-speed').value,10)||0,
+      use_error: $('dv-light-useerror').checked,
+      error: hexToRgb($('dv-light-error').value)
     };
     ventFlash('dv-light-msg','Saving…');
     ventPost('/api/v2/lighting',body)
