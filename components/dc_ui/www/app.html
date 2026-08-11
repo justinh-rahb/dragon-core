@@ -306,6 +306,11 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
 .set-info dt{ color: var(--muted-foreground); }
 .set-info dd{ margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   word-break: break-all; text-align: right; }
+.light-row{ display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 13px; }
+.light-row > label:first-child{ color: var(--muted-foreground); }
+.light-row input[type=color]{ inline-size: 44px; block-size: 26px; padding: 0; border: 1px solid var(--border); border-radius: 6px; background: none; cursor: pointer; }
+.light-row input[type=range]{ inline-size: 55%; }
+.light-range input[type=number]{ inline-size: 52px; }
 .log-list{ display: flex; flex-direction: column; gap: 2px; max-height: 220px;
   overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
 .log-list .log-row{ display: flex; gap: 8px; padding: 2px 0; border-bottom: 1px solid var(--border); }
@@ -413,6 +418,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
 .vent-main[data-vent-page="home"] [data-vent-content="home"],
 .vent-main[data-vent-page="manual"] [data-vent-content="manual"],
 .vent-main[data-vent-page="auto"] [data-vent-content="auto"],
+.vent-main[data-vent-page="lighting"] [data-vent-content="lighting"],
 .vent-main[data-vent-page="settings"] [data-vent-content="settings"]{ display:flex; }
 .vent-home{ flex-direction:column; gap:9px; overflow:auto; }
 .vent-grid{ min-height:0; display:grid; grid-template-columns:minmax(0,1.15fr) minmax(190px,.85fr);
@@ -501,6 +507,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
   <symbol id="i-spool" viewBox="0 0 24 24"><rect x="4" y="3" width="3" height="18" rx="1"/><rect x="17" y="3" width="3" height="18" rx="1"/><path d="M7 8h10M7 12h10M7 16h10"/></symbol>
   <symbol id="i-fan" viewBox="0 0 24 24"><path d="M10.827 16.379a6.082 6.082 0 0 1-8.618-7.002l5.412 1.45a6.082 6.082 0 0 1 7.002-8.618l-1.45 5.412a6.082 6.082 0 0 1 8.618 7.002l-5.412-1.45a6.082 6.082 0 0 1-7.002 8.618l1.45-5.412Z"/><path d="M12 12v.01"/></symbol>
   <symbol id="i-settings" viewBox="0 0 24 24"><path d="M20 7h-9"/><path d="M14 17H5"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/></symbol>
+  <symbol id="i-bulb" viewBox="0 0 24 24"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A4.65 4.65 0 0 0 18 8 6 6 0 0 0 6 8c0 1 .23 2.23 1.5 3.5A4.61 4.61 0 0 1 8.91 14"/></symbol>
   <symbol id="i-thermometer" viewBox="0 0 24 24"><path d="M14 4v10.54a4 4 0 1 1-4 0V4a2 2 0 0 1 4 0z"/></symbol>
   <symbol id="i-power" viewBox="0 0 24 24"><path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.8 0"/></symbol>
   <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
@@ -935,6 +942,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
       <button class="tab vent-tab" type="button" data-vent-page="home" aria-selected="true" aria-label="Dashboard"><svg class="icon"><use href="#i-house"/></svg></button>
       <button class="tab vent-tab" type="button" data-vent-page="manual" aria-selected="false" aria-label="Manual vent control"><svg class="icon"><use href="#i-vent"/></svg></button>
       <button class="tab vent-tab" type="button" data-vent-page="auto" aria-selected="false" aria-label="Automatic vent policy"><svg class="icon"><use href="#i-refresh"/></svg></button>
+      <button class="tab vent-tab" type="button" data-vent-page="lighting" aria-selected="false" aria-label="Lighting"><svg class="icon"><use href="#i-bulb"/></svg></button>
       <button class="tab vent-tab" type="button" data-vent-page="settings" aria-selected="false" aria-label="Settings"><svg class="icon"><use href="#i-settings"/></svg></button>
     </nav>
 
@@ -1004,6 +1012,23 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
         </div>
         <button class="btn btn-primary btn-block" type="button" id="dv-auto-save"><svg class="icon"><use href="#i-refresh"/></svg> Save &amp; enable Auto</button>
         <div class="mode-feedback" id="dv-auto-msg" role="status" aria-live="polite"></div>
+      </section>
+
+      <section class="vent-view vent-settings" data-vent-content="lighting">
+        <article class="set-card">
+          <h3>Vent lighting</h3>
+          <p class="set-note">Strip-LED color. Default: blue when open (cool), red when closed (hot). Optionally show a color while printing, or blend open&rarr;closed by bed temperature.</p>
+          <div class="light-row"><label for="dv-light-enabled">Lighting on</label><input type="checkbox" id="dv-light-enabled"></div>
+          <div class="light-row"><label for="dv-light-bright">Brightness</label><input type="range" id="dv-light-bright" min="0" max="255"></div>
+          <div class="light-row"><label for="dv-light-open">Open color (cool)</label><input type="color" id="dv-light-open"></div>
+          <div class="light-row"><label for="dv-light-closed">Closed color (hot)</label><input type="color" id="dv-light-closed"></div>
+          <div class="light-row"><label for="dv-light-useprint">Show a color while printing</label><input type="checkbox" id="dv-light-useprint"></div>
+          <div class="light-row"><label for="dv-light-print">Printing color</label><input type="color" id="dv-light-print"></div>
+          <div class="light-row"><label for="dv-light-usetemp">Temperature gradient</label><input type="checkbox" id="dv-light-usetemp"></div>
+          <div class="light-row"><label>Gradient range &deg;C</label><span class="light-range"><input type="number" id="dv-light-tmin" min="0" max="120" step="1"> &ndash; <input type="number" id="dv-light-tmax" min="0" max="120" step="1"></span></div>
+          <button class="btn btn-primary btn-block" type="button" id="dv-light-save"><svg class="icon"><use href="#i-bulb"/></svg> Save lighting</button>
+          <div class="mode-feedback" id="dv-light-msg" role="status" aria-live="polite"></div>
+        </article>
       </section>
 
       <section class="vent-view vent-settings" data-vent-content="settings">
@@ -1524,6 +1549,24 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     document.querySelectorAll('.vent-tab').forEach(function(t){
       t.setAttribute('aria-selected', String(t===tab));
     });
+    if(page==='lighting') loadLighting();
+  }
+
+  function rgbToHex(a){ function h(n){ return ('0'+((n||0)&255).toString(16)).slice(-2); }
+    return '#'+h(a&&a[0])+h(a&&a[1])+h(a&&a[2]); }
+  function hexToRgb(s){ return [parseInt(s.substr(1,2),16), parseInt(s.substr(3,2),16), parseInt(s.substr(5,2),16)]; }
+  function loadLighting(){
+    fetch('/api/v2/lighting',{cache:'no-store'}).then(function(r){return r.json();}).then(function(c){
+      $('dv-light-enabled').checked=!!c.enabled;
+      $('dv-light-bright').value=c.brightness;
+      $('dv-light-open').value=rgbToHex(c.open);
+      $('dv-light-closed').value=rgbToHex(c.closed);
+      $('dv-light-print').value=rgbToHex(c.printing);
+      $('dv-light-useprint').checked=!!c.use_printing;
+      $('dv-light-usetemp').checked=!!c.use_temp;
+      $('dv-light-tmin').value=c.temp_min_c;
+      $('dv-light-tmax').value=c.temp_max_c;
+    }).catch(function(){});
   }
   function ventTargetLabel(v){
     return v==='open'?'OPEN':v==='closed'?'CLOSED':'STOPPED';
@@ -2226,6 +2269,23 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
         },800);
       })
       .catch(function(j){ ventFlash('dv-cal-msg',(j&&j.message)||'Calibration failed.','is-error'); });
+  });
+  $('dv-light-save').addEventListener('click',function(){
+    var body={
+      enabled: $('dv-light-enabled').checked,
+      brightness: parseInt($('dv-light-bright').value,10)||0,
+      open: hexToRgb($('dv-light-open').value),
+      closed: hexToRgb($('dv-light-closed').value),
+      printing: hexToRgb($('dv-light-print').value),
+      use_printing: $('dv-light-useprint').checked,
+      use_temp: $('dv-light-usetemp').checked,
+      temp_min_c: parseInt($('dv-light-tmin').value,10)||0,
+      temp_max_c: parseInt($('dv-light-tmax').value,10)||0
+    };
+    ventFlash('dv-light-msg','Saving…');
+    ventPost('/api/v2/lighting',body)
+      .then(function(){ ventFlash('dv-light-msg','Lighting saved.','is-ok'); })
+      .catch(function(j){ ventFlash('dv-light-msg',(j&&j.message)||'Save failed.','is-error'); });
   });
   ['dv-open-range','dv-close-range'].forEach(function(id){
     $(id).addEventListener('input',function(){ u(id.replace('-range','-value'),this.value+' °C'); });
