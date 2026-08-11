@@ -47,6 +47,15 @@ static char  s_ps_state[16]     = "";   // print_stats.state
 static char  s_wh_state[16]     = "";   // webhooks.state
 static float s_last_progress    = 0.0f;
 
+// Material has two sources; save_variables (explicit user opt-in) wins over the
+// slicer's filament_type from the g-code metadata (automatic, no macro needed).
+static char  s_mat_sv[16]       = "";   // save_variables.variables.material
+static char  s_mat_meta[16]     = "";   // metadata filament_type
+static char  s_meta_file[64]    = "";   // filename we last requested metadata for
+
+static void send_metadata_request(const char *filename);
+static void maybe_fetch_metadata(void);
+
 const char *dc_printer_state_str(dc_printer_state_t s)
 {
     switch (s) {
@@ -164,6 +173,15 @@ static void copy_upper(char *dst, size_t dst_sz, const char *src)
     dst[i] = '\0';
 }
 
+// Publish the effective material: an explicit save_variables value wins, else the
+// slicer's filament_type from g-code metadata. Caller holds s_lock.
+static void recompute_material(void)
+{
+    const char *src = s_mat_sv[0] ? s_mat_sv : s_mat_meta;
+    strncpy(s_status.material, src, sizeof(s_status.material) - 1);
+    s_status.material[sizeof(s_status.material) - 1] = '\0';
+}
+
 // Merge one status object (e.g. {"heater_bed":{"temperature":55.3}}) into the
 // cached status. Fields not present in the update are left untouched, matching
 // Moonraker's delta semantics.
@@ -239,7 +257,8 @@ static void merge_status_object(cJSON *status)
         if (cJSON_IsObject(vars)) {
             cJSON *m = cJSON_GetObjectItemCaseSensitive(vars, "material");
             if (cJSON_IsString(m)) {
-                copy_upper(s_status.material, sizeof(s_status.material), m->valuestring);
+                copy_upper(s_mat_sv, sizeof(s_mat_sv), m->valuestring);
+                recompute_material();
             }
         }
     }
@@ -271,6 +290,27 @@ static void handle_frame(const char *json, size_t len)
                      dc_printer_state_str(s_status.printer),
                      s_status.bed_temp,
                      s_status.material[0] ? s_status.material : "?");
+            cJSON_Delete(root);
+            maybe_fetch_metadata();   // a print may already be loaded
+            return;
+        }
+        // server.files.metadata reply: {"result":{"filament_type":"PLA",...}}.
+        // filament_type can be comma/semicolon-separated for multi-material — take
+        // the first entry; the save_variables value (if any) still wins.
+        cJSON *ft = cJSON_GetObjectItemCaseSensitive(result, "filament_type");
+        if (cJSON_IsString(ft) && ft->valuestring[0]) {
+            char first[16];
+            size_t k = 0;
+            for (const char *p = ft->valuestring; *p && *p != ',' && *p != ';' && k < sizeof(first) - 1; ++p) {
+                first[k++] = *p;
+            }
+            while (k > 0 && first[k - 1] == ' ') --k;
+            first[k] = '\0';
+            xSemaphoreTake(s_lock, portMAX_DELAY);
+            copy_upper(s_mat_meta, sizeof(s_mat_meta), first);
+            recompute_material();
+            xSemaphoreGive(s_lock);
+            ESP_LOGI(TAG, "metadata filament_type=%s", first);
         }
         cJSON_Delete(root);
         return;
@@ -289,6 +329,7 @@ static void handle_frame(const char *json, size_t len)
                 merge_status_object(delta);
                 xSemaphoreGive(s_lock);
             }
+            maybe_fetch_metadata();   // fetch filament_type when a new print loads
         }
         // Klippy has just come back after a restart / firmware-restart.
         // Moonraker preserves subscriptions server-side but does NOT replay
@@ -343,6 +384,44 @@ static void send_subscribe(void)
     int sent = esp_websocket_client_send_text(s_ws, req, strlen(req),
                                               pdMS_TO_TICKS(NETWORK_TIMEOUT_MS));
     if (sent < 0) ESP_LOGW(TAG, "subscribe send failed");
+    s_meta_file[0] = '\0';   // re-fetch metadata after a (re)subscribe
+}
+
+// Ask Moonraker for a file's metadata; the reply carries the slicer's
+// filament_type, so we can auto-detect material with no save_variables macro.
+static void send_metadata_request(const char *filename)
+{
+    if (s_ws == NULL || filename == NULL || filename[0] == '\0') return;
+    char esc[128];
+    size_t k = 0;
+    for (const char *p = filename; *p && k < sizeof(esc) - 2; ++p) {
+        if (*p == '"' || *p == '\\') esc[k++] = '\\';   // JSON-escape the name
+        esc[k++] = *p;
+    }
+    esc[k] = '\0';
+    char req[256];
+    int n = snprintf(req, sizeof(req),
+        "{\"jsonrpc\":\"2.0\",\"method\":\"server.files.metadata\","
+        "\"params\":{\"filename\":\"%s\"},\"id\":2}", esc);
+    if (n > 0 && n < (int)sizeof(req)) {
+        esp_websocket_client_send_text(s_ws, req, strlen(req), pdMS_TO_TICKS(NETWORK_TIMEOUT_MS));
+    }
+}
+
+// After a status merge, request metadata once per new print filename.
+static void maybe_fetch_metadata(void)
+{
+    char want[64];
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    strncpy(want, s_status.filename, sizeof(want) - 1);
+    want[sizeof(want) - 1] = '\0';
+    bool need = want[0] && strcmp(want, s_meta_file) != 0;
+    if (need) {
+        strncpy(s_meta_file, want, sizeof(s_meta_file) - 1);
+        s_meta_file[sizeof(s_meta_file) - 1] = '\0';
+    }
+    xSemaphoreGive(s_lock);
+    if (need) send_metadata_request(want);
 }
 
 // Frames can arrive split across multiple DATA events. We buffer partials and
