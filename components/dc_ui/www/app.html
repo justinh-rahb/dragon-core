@@ -480,6 +480,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
   display:flex; flex-direction:column; gap:10px; }
 .status-tab[data-status-page="settings"]{ margin-top:auto; }
 .status-main .app-version{ margin-top:auto; }
+.status-view{display:none}.status-main[data-status-page="home"] [data-status-content="home"],.status-main[data-status-page="lighting"] [data-status-content="lighting"]{display:flex}.status-home,.status-lighting{flex-direction:column;gap:10px}.status-lighting{max-width:560px;width:100%}
 .status-hero{ display:grid; grid-template-columns:minmax(118px,.45fr) minmax(0,1fr); gap:18px; align-items:center; }
 .status-orb{ width:min(30vw,145px); aspect-ratio:1; border-radius:50%; display:grid; place-items:center;
   color:var(--primary); border:1px solid color-mix(in srgb,var(--primary) 38%,var(--border));
@@ -1128,9 +1129,10 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     <nav class="rail" aria-label="DragonStatus navigation">
       <div class="connection" aria-label="Connection"><i class="dot"></i><span id="ds-conn">Connecting…</span></div>
       <button class="tab status-tab" type="button" data-status-page="home" aria-selected="true" aria-label="Status"><svg class="icon"><use href="#i-house"/></svg></button>
+      <button class="tab status-tab" type="button" data-status-page="lighting" aria-selected="false" aria-label="Lighting"><svg class="icon"><use href="#i-bulb"/></svg></button>
       <a class="tab status-tab" data-status-page="settings" href="#setup" data-open-provisioning aria-label="Device setup"><svg class="icon"><use href="#i-settings"/></svg></a>
     </nav>
-    <main class="status-main">
+    <main class="status-main" id="ds-main" data-status-page="home"><section class="status-view status-home" data-status-content="home">
       <article class="card status-hero">
         <div class="status-orb" aria-hidden="true"><div><strong id="ds-state">--</strong><span>printer</span></div></div>
         <div class="status-copy"><h2>DragonStatus</h2><p id="ds-summary">Connecting to printer status…</p><span class="status-chip" id="ds-light-state">Status lighting</span></div>
@@ -1146,7 +1148,8 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
         </dl></article>
       </div>
       <article class="card status-card"><h3>Lighting</h3><p class="set-note" id="ds-light-detail">Factory status effects follow the connected printer.</p></article>
-      <a class="btn btn-primary btn-block" href="#setup" data-open-provisioning><svg class="icon"><use href="#i-settings"/></svg> Open device setup</a>
+      <a class="btn btn-primary btn-block" href="#setup" data-open-provisioning><svg class="icon"><use href="#i-settings"/></svg> Open device setup</a></section>
+      <section class="status-view status-lighting" data-status-content="lighting"><article class="set-card"><h3>Status lighting</h3><p class="set-note">Factory H2D follows the printer. An override uses one effect for every state.</p><div class="light-row"><label for="ds-light-enabled">Lighting on</label><input type="checkbox" id="ds-light-enabled"></div><div class="light-row"><label for="ds-light-bright">Brightness</label><input type="range" id="ds-light-bright" min="0" max="255"></div><div class="light-row"><label for="ds-light-effect">Effect</label><select id="ds-light-effect"><option value="0">Factory H2D</option><option value="1">Solid</option><option value="2">Breathe</option><option value="3">Rainbow</option><option value="4">Blink</option><option value="5">Flow</option></select></div><div class="light-row"><label for="ds-light-speed">Effect speed</label><input type="range" id="ds-light-speed" min="0" max="255"></div><button class="btn btn-primary btn-block" type="button" id="ds-light-save">Save lighting</button><div class="mode-feedback" id="ds-light-msg"></div></article></section>
       <div class="app-version">DragonStatus <span id="ds-footer-version">—</span></div>
     </main>
   </div>
@@ -1690,6 +1693,9 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     statusApp.setAttribute('data-online', ok?'1':'0');
     u('ds-conn', ok?'Connected':'Reconnecting…');
   }
+  function statusPage(page){$('ds-main').dataset.statusPage=page;document.querySelectorAll('.status-tab').forEach(function(t){t.setAttribute('aria-selected',String(t.dataset.statusPage===page));});if(page==='lighting')fetch('/api/v2/lighting').then(function(r){return r.json()}).then(function(c){$('ds-light-enabled').checked=!!c.enabled;$('ds-light-bright').value=c.brightness;$('ds-light-effect').value=c.effect||0;$('ds-light-speed').value=c.speed;}).catch(function(){});}
+  document.querySelectorAll('.status-tab').forEach(function(t){if(t.dataset.statusPage!=='settings')t.addEventListener('click',function(){statusPage(t.dataset.statusPage);});});
+  $('ds-light-save').addEventListener('click',function(){fetch('/api/v2/lighting',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:$('ds-light-enabled').checked,brightness:+$('ds-light-bright').value,effect:+$('ds-light-effect').value,speed:+$('ds-light-speed').value})}).then(function(r){if(!r.ok)throw 0;$('ds-light-msg').textContent='Lighting saved.';}).catch(function(){$('ds-light-msg').textContent='Could not save lighting.';});});
 
   function titleCase(value){
     return String(value||'unknown').replace(/[_-]+/g,' ').replace(/\b\w/g,function(c){ return c.toUpperCase(); });
