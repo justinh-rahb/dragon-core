@@ -32,6 +32,23 @@ DragonVent selects its dedicated airflow surface with an additive descriptor:
 }
 ```
 
+DragonStatus selects the family-owned status-light surface the same way:
+
+```json
+{
+  "capabilities": ["source_status", "lighting", "polling"],
+  "ui": {
+    "schema": 1,
+    "product": "dragonstatus",
+    "display_name": "DragonStatus"
+  }
+}
+```
+
+The DragonStatus surface uses the family’s ember-orange accent (`#F97316`) and
+renders its printer, Wi-Fi, and lighting readiness state from `/api/v2/state`.
+Product firmware owns those state values; the SPA owns their presentation.
+
 That surface uses the same responsive shell and appearance controls as
 DragonBreath, but has vent-specific state, manual open/close controls, and the
 automatic bed-temperature policy. It does not reinterpret vent motion as heater
