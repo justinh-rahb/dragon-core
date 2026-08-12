@@ -2,8 +2,9 @@
 // on-device MQTT-over-TLS broker so AUTO can follow a Bambu print, mirroring the
 // Moonraker path. Read-only — no control commands are ever sent to the printer.
 //
-// UNTESTED against real hardware (the maintainer has no Bambu printer); built from
-// the OpenBambuAPI / ha-bambulab protocol spec for community validation. Protocol:
+// Validated against a real Bambu P1S (2026-08-11): connects, subscribes, and
+// decodes live report data. Built from the OpenBambuAPI / ha-bambulab protocol
+// spec; other models remain unvalidated. Protocol:
 //   mqtts://<host>:8883, user "bblp", pass = LAN access code, self-signed cert
 //   (CN=serial, connect by IP -> cert verification relaxed). Subscribe
 //   device/<serial>/report; publish one "pushall" on connect (P1/A1 send deltas).
@@ -22,6 +23,23 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>   // strncasecmp / strcasecmp for filament zone matching
+
+// Bambu's broker presents a per-device SELF-SIGNED cert (CN=serial) and we reach
+// it by IP, so there is no CA to verify against and the client below deliberately
+// connects without server-cert verification. esp-tls only permits that when these
+// are enabled; without them it refuses to build the TLS context at all and every
+// connect fails with "No server verification option set in esp_tls_cfg_t" —
+// which reads like a network or credential fault, not a missing build option.
+//
+// Asserted here rather than left to a comment because a product supplying neither
+// still compiles, links and runs, and only fails on a real connection attempt.
+// DragonVent shipped in exactly that state; see justinh-rahb/DragonVent#13.
+#if !defined(CONFIG_ESP_TLS_SKIP_SERVER_CERT_VERIFY) || !defined(CONFIG_ESP_TLS_INSECURE)
+#error "dc_bambu requires CONFIG_ESP_TLS_INSECURE=y and CONFIG_ESP_TLS_SKIP_SERVER_CERT_VERIFY=y \
+in the product's sdkconfig.defaults. Bambu's LAN broker uses a per-device self-signed cert reached \
+by IP, so there is no CA to verify against; without these esp-tls fails SSL setup and the client can \
+never connect. Add both, or drop the dc_bambu dependency."
+#endif
 
 static const char *TAG = "dc_bambu";
 
