@@ -37,6 +37,12 @@ for (const marker of [
   "function applyVent(s)",
   "ventPost('/api/v2/settings'",
   "ventCommand('manual'",
+  'ui.product===\'dragonstatus\'',
+  'id="ds-app"',
+  'rgb(249 115 22)',
+  "function applyStatus(s)",
+  "product==='dragonstatus'?statusSetConn(false)",
+  '.status-tab[data-status-page="settings"]{ margin-top:auto; }',
   'id="dc-provisioning"',
   "function dcFetchJson(path,options,retried)",
   // Auth transport: exactly one token derivation, used by dcFetchJson, and

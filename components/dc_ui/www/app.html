@@ -466,6 +466,35 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
   font-weight:600; text-transform:uppercase; }
 .vent-threshold .touch-value{ margin:10px 0 5px; font-size:27px; }
 .vent-settings{ flex-direction:column; gap:12px; max-width:560px; width:100%; }
+/* ---- DragonStatus product surface. Orange identifies the ambient/status
+   device without borrowing DragonBreath's blue or DragonVent's teal. The
+   product adapter only reports printer/Wi-Fi/lighting state; all rendering
+   stays here in the family SPA. ---- */
+.status-app{
+  --primary: light-dark(rgb(249 115 22), rgb(251 146 60));
+  --ring: light-dark(rgb(234 88 12), rgb(251 146 60 / 76%));
+  --viz-series-1: var(--primary);
+  --viz-series-2: light-dark(rgb(34 197 94), rgb(74 222 128));
+}
+.status-main{ min-width:0; min-height:0; overflow:auto; padding:12px;
+  display:flex; flex-direction:column; gap:10px; }
+.status-tab[data-status-page="settings"]{ margin-top:auto; }
+.status-main .app-version{ margin-top:auto; }
+.status-view{display:none}.status-main[data-status-page="home"] [data-status-content="home"],.status-main[data-status-page="lighting"] [data-status-content="lighting"]{display:flex}.status-home,.status-lighting{flex-direction:column;gap:10px}.status-lighting{max-width:560px;width:100%}
+.status-hero{ display:grid; grid-template-columns:minmax(118px,.45fr) minmax(0,1fr); gap:18px; align-items:center; }
+.status-orb{ width:min(30vw,145px); aspect-ratio:1; border-radius:50%; display:grid; place-items:center;
+  color:var(--primary); border:1px solid color-mix(in srgb,var(--primary) 38%,var(--border));
+  background:radial-gradient(circle, color-mix(in srgb,var(--primary) 24%,transparent) 0 28%, color-mix(in srgb,var(--primary) 8%,transparent) 29% 52%, transparent 53%); }
+.status-orb strong{ display:block; font-size:26px; line-height:1; text-align:center; }
+.status-orb span{ display:block; margin-top:5px; color:var(--muted-foreground); font-size:10px; font-weight:600; letter-spacing:.08em; text-align:center; text-transform:uppercase; }
+.status-copy h2{ margin:0 0 6px; font-size:28px; line-height:1; }
+.status-copy p{ margin:0; color:var(--muted-foreground); }
+.status-chip{ display:inline-flex; align-items:center; gap:6px; margin-top:12px; padding:4px 8px; border-radius:var(--radius-full); color:var(--primary); background:color-mix(in srgb,var(--primary) 12%,transparent); font-size:11px; font-weight:600; }
+.status-chip::before{ content:""; width:7px; height:7px; border-radius:50%; background:currentColor; }
+.status-grid{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+.status-card h3{ margin-top:0; }
+.status-card .set-note{ margin-bottom:0; }
+@container (max-width:520px){ .status-hero,.status-grid{ grid-template-columns:1fr; } .status-orb{ width:112px; } }
 .provision-overlay{ position:fixed; inset:0; z-index:20; overflow:auto; padding:18px;
   background:var(--background); }
 .provision-shell{ width:min(680px,100%); margin:0 auto; display:flex; flex-direction:column; gap:10px; }
@@ -1095,6 +1124,37 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
   </div>
 </div>
 
+<div class="app status-app" id="ds-app" data-online="0" hidden>
+  <div class="shell">
+    <nav class="rail" aria-label="DragonStatus navigation">
+      <div class="connection" aria-label="Connection"><i class="dot"></i><span id="ds-conn">Connecting…</span></div>
+      <button class="tab status-tab" type="button" data-status-page="home" aria-selected="true" aria-label="Status"><svg class="icon"><use href="#i-house"/></svg></button>
+      <button class="tab status-tab" type="button" data-status-page="lighting" aria-selected="false" aria-label="Lighting"><svg class="icon"><use href="#i-bulb"/></svg></button>
+      <a class="tab status-tab" data-status-page="settings" href="#setup" data-open-provisioning aria-label="Device setup"><svg class="icon"><use href="#i-settings"/></svg></a>
+    </nav>
+    <main class="status-main" id="ds-main" data-status-page="home"><section class="status-view status-home" data-status-content="home">
+      <article class="card status-hero">
+        <div class="status-orb" aria-hidden="true"><div><strong id="ds-state">--</strong><span>printer</span></div></div>
+        <div class="status-copy"><h2>DragonStatus</h2><p id="ds-summary">Connecting to printer status…</p><span class="status-chip" id="ds-light-state">Status lighting</span></div>
+      </article>
+      <div class="status-grid">
+        <article class="card status-card"><h3>Printer</h3><dl class="status-detail">
+          <div><dt>Source</dt><dd id="ds-source">--</dd></div>
+          <div><dt>State</dt><dd id="ds-printer-state">--</dd></div>
+        </dl></article>
+        <article class="card status-card"><h3>Device</h3><dl class="status-detail">
+          <div><dt>Wi-Fi</dt><dd id="ds-wifi">--</dd></div>
+          <div><dt>Firmware</dt><dd id="ds-version">--</dd></div>
+        </dl></article>
+      </div>
+      <article class="card status-card"><h3>Lighting</h3><p class="set-note" id="ds-light-detail">Factory status effects follow the connected printer.</p></article>
+      <a class="btn btn-primary btn-block" href="#setup" data-open-provisioning><svg class="icon"><use href="#i-settings"/></svg> Open device setup</a></section>
+      <section class="status-view status-lighting" data-status-content="lighting"><article class="set-card"><h3>Status lighting</h3><p class="set-note">Factory H2D retains the Panda Status transitions. Its idle, printing, and error colours are yours to tune; an override applies one effect to every state.</p><div class="light-row"><label for="ds-light-enabled">Lighting on</label><input type="checkbox" id="ds-light-enabled"></div><div class="light-row"><label for="ds-light-bright">Brightness</label><input type="range" id="ds-light-bright" min="0" max="255"></div><div class="light-row"><label for="ds-light-idle">Idle / paused</label><input type="color" id="ds-light-idle"></div><div class="light-row"><label for="ds-light-printing">Printing</label><input type="color" id="ds-light-printing"></div><div class="light-row"><label for="ds-light-error">Error</label><input type="color" id="ds-light-error"></div><div class="light-row"><label for="ds-light-effect">Effect</label><select id="ds-light-effect"><option value="0">Factory H2D</option><option value="1">Solid override</option><option value="2">Breathe override</option><option value="3">Rainbow override</option><option value="4">Blink override</option><option value="5">Flow override</option><option value="6">Cylon eye (red)</option></select></div><div class="light-row"><label for="ds-light-speed">Effect speed</label><input type="range" id="ds-light-speed" min="0" max="255"></div><button class="btn btn-primary btn-block" type="button" id="ds-light-save">Save lighting</button><div class="mode-feedback" id="ds-light-msg"></div></article></section>
+      <div class="app-version">DragonStatus <span id="ds-footer-version">—</span></div>
+    </main>
+  </div>
+</div>
+
 <section class="provision-overlay" id="dc-provisioning" hidden aria-label="Device setup">
   <div class="provision-shell">
     <div class="provision-head"><div><strong id="dc-setup-title">Device setup</strong><div class="set-note" id="dc-setup-mode"></div></div>
@@ -1130,6 +1190,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
 (function(){
   var app = document.querySelector('.app');
   var ventApp = document.getElementById('dv-app');
+  var statusApp = document.getElementById('ds-app');
   var ventWasCalibrating = false;
   var product = 'dragonbreath';
   var $ = function(id){ return document.getElementById(id); };
@@ -1376,12 +1437,24 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     if(ui.product==='dragonvent'){
       product='dragonvent';
       app.hidden=true;
+      statusApp.hidden=true;
       ventApp.hidden=false;
       ventApp.setAttribute('data-online','0');
       document.title=ui.display_name||'DragonVent';
       u('dv-version', i.firmware||'--');
       u('dv-footer-version', i.firmware||'—');
       u('dv-device-id', i.device_id||'--');
+      return;
+    }
+    if(ui.product==='dragonstatus'){
+      product='dragonstatus';
+      app.hidden=true;
+      ventApp.hidden=true;
+      statusApp.hidden=false;
+      statusApp.setAttribute('data-online','0');
+      document.title=ui.display_name||'DragonStatus';
+      u('ds-version', i.firmware||'—');
+      u('ds-footer-version', i.firmware||'—');
       return;
     }
     var title=$('dc-product-title');
@@ -1614,6 +1687,41 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     ventApp.setAttribute('data-online', ok?'1':'0');
     u('dv-conn', ok?'Connected':'Reconnecting…');
   }
+
+  function statusSetConn(ok){
+    if(!statusApp) return;
+    statusApp.setAttribute('data-online', ok?'1':'0');
+    u('ds-conn', ok?'Connected':'Reconnecting…');
+  }
+  function statusRgbToHex(rgb){return rgbToHex(rgb||[255,255,255]);}
+  function statusPage(page){$('ds-main').dataset.statusPage=page;document.querySelectorAll('.status-tab').forEach(function(t){t.setAttribute('aria-selected',String(t.dataset.statusPage===page));});if(page==='lighting')fetch('/api/v2/lighting',{cache:'no-store'}).then(function(r){return r.json()}).then(function(c){$('ds-light-enabled').checked=!!c.enabled;$('ds-light-bright').value=c.brightness;$('ds-light-idle').value=statusRgbToHex(c.idle);$('ds-light-printing').value=statusRgbToHex(c.printing);$('ds-light-error').value=statusRgbToHex(c.error||[255,0,0]);$('ds-light-effect').value=c.effect||0;$('ds-light-speed').value=c.speed;}).catch(function(){});}
+  document.querySelectorAll('.status-tab').forEach(function(t){if(t.dataset.statusPage!=='settings')t.addEventListener('click',function(){statusPage(t.dataset.statusPage);});});
+  $('ds-light-save').addEventListener('click',function(){fetch('/api/v2/lighting',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:$('ds-light-enabled').checked,brightness:+$('ds-light-bright').value,idle:hexToRgb($('ds-light-idle').value),printing:hexToRgb($('ds-light-printing').value),error:hexToRgb($('ds-light-error').value),effect:+$('ds-light-effect').value,speed:+$('ds-light-speed').value})}).then(function(r){if(!r.ok)throw 0;$('ds-light-msg').textContent='Lighting saved.';}).catch(function(){$('ds-light-msg').textContent='Could not save lighting.';});});
+
+  function titleCase(value){
+    return String(value||'unknown').replace(/[_-]+/g,' ').replace(/\b\w/g,function(c){ return c.toUpperCase(); });
+  }
+
+  function applyStatus(s){
+    if(!s || s.api_version!==2 || !s.printer) return;
+    if(product!=='dragonstatus'){
+      applyDeviceInfo({firmware:s.firmware, ui:{schema:1,product:'dragonstatus',display_name:'DragonStatus'}});
+    }
+    var printer=s.printer||{}, wifi=s.wifi||{}, lighting=s.lighting||{};
+    var state=printer.state||'unknown';
+    u('ds-state', titleCase(state));
+    u('ds-printer-state', titleCase(state));
+    u('ds-source', titleCase(printer.source));
+    u('ds-wifi', titleCase(wifi.state));
+    u('ds-version', s.firmware||'—');
+    u('ds-footer-version', s.firmware||'—');
+    var source=printer.source||'standalone';
+    var connected=source!=='standalone' && state!=='unknown';
+    u('ds-light-state', connected ? 'Following printer status' : 'Ready for printer setup');
+    u('ds-light-detail', connected ? 'Factory status effects are following the printer state.' : 'Choose a Bambu or Moonraker printer in Device setup to begin status lighting.');
+    u('ds-summary', connected ? 'Tracking '+titleCase(state)+' from '+titleCase(source)+'.' : 'Connect a printer in Device setup to begin.');
+    statusSetConn(true);
+  }
   function ventActivatePage(page){
     var tab=document.querySelector('.vent-tab[data-vent-page="'+page+'"]');
     if(!tab) return;
@@ -1740,6 +1848,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
 
   function apply(s){
     if(s && s.vent){ applyVent(s); return; }
+    if(s && s.printer && s.wifi && s.lighting){ applyStatus(s); return; }
     if(!s || s.api_version!==2) return;
     if(last && s.boot_id===last.boot_id && s.state_revision<rev) return;
     if(last && s.boot_id!==last.boot_id) lease=null;   // device rebooted -> our lease is gone
@@ -1897,7 +2006,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     fetch('/api/v2/state', {cache:'no-store'})
       .then(function(r){ if(!r.ok) throw 0; return r.json(); })
       .then(function(s){ apply(s); pollDelay=2000; })
-      .catch(function(){ product==='dragonvent'?ventSetConn(false):setConn(false); pollDelay=Math.min(10000, Math.round(pollDelay*1.6)); })
+      .catch(function(){ product==='dragonvent'?ventSetConn(false):product==='dragonstatus'?statusSetConn(false):setConn(false); pollDelay=Math.min(10000, Math.round(pollDelay*1.6)); })
       .finally(function(){ polling=false; setTimeout(poll, pollDelay+Math.random()*250); });
   }
   function events(){
@@ -1905,7 +2014,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     function ev(e){ seen=true; try{ apply(JSON.parse(e.data)); }catch(_){} }
     es.addEventListener('state', ev);
     es.addEventListener('telemetry', ev);
-    es.onerror=function(){ es.close(); product==='dragonvent'?ventSetConn(false):setConn(false); if(!seen) poll(); else setTimeout(poll,1000); };
+    es.onerror=function(){ es.close(); product==='dragonvent'?ventSetConn(false):product==='dragonstatus'?statusSetConn(false):setConn(false); if(!seen) poll(); else setTimeout(poll,1000); };
   }
 
   /* ---- Navigation: rail tabs. Home = live Dashboard; manual/auto/dry = U2 control
