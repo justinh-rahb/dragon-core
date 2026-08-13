@@ -1,4 +1,4 @@
-version: "0.1.0"
+version: "0.16.1"
 description: Product-configurable Wi-Fi, AP provisioning, scanning, and mDNS
 license: MIT
 dependencies:
