@@ -1,0 +1,6 @@
+version: "0.1.0"
+description: Board-neutral WS2812 renderer for Dragon-family firmware
+license: MIT
+dependencies:
+  idf: ">=5.3"
+  espressif/led_strip: "^2.5.3"

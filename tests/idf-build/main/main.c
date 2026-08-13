@@ -1,5 +1,6 @@
 #include "dc_bambu.h"
 #include "dc_evlog.h"
+#include "dc_lighting.h"
 #include "dc_moonraker.h"
 #include "dc_mqtt.h"
 #include "dc_portal.h"
@@ -17,6 +18,7 @@ void app_main(void)
     dc_mqtt_config_t mqtt_config = {0};
     dc_bambu_config_t bambu_config = {0};
     dc_moonraker_config_t moonraker_config = {0};
+    dc_lighting_output_t lighting_output = {0};
     // Config APIs are deliberately valid before either client is started. Shared
     // provisioning uses this to edit inactive sources without losing saved fields.
     (void)dc_bambu_get_config(&bambu_config);
@@ -25,6 +27,7 @@ void app_main(void)
     (void)dc_moonraker_set_config(&moonraker_config);
     (void)dc_mqtt_start(&mqtt_config, &mqtt);
     (void)dc_mqtt_destroy(mqtt);
+    (void)dc_lighting_start(&(dc_lighting_config_t){ .outputs = &lighting_output });
     (void)dc_ui_spa_asset();
     (void)dc_portal_start(NULL);
     (void)dc_portal_httpd();
