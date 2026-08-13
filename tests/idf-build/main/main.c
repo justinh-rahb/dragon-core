@@ -28,6 +28,8 @@ void app_main(void)
     (void)dc_mqtt_start(&mqtt_config, &mqtt);
     (void)dc_mqtt_destroy(mqtt);
     (void)dc_lighting_start(&(dc_lighting_config_t){ .outputs = &lighting_output });
+    (void)dc_lighting_set_brightness(0);
+    (void)dc_lighting_set_output_reverse(0, false);
     (void)dc_ui_spa_asset();
     (void)dc_portal_start(NULL);
     (void)dc_portal_httpd();

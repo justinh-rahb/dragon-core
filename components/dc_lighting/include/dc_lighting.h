@@ -60,6 +60,8 @@ typedef struct {
 
 esp_err_t dc_lighting_start(const dc_lighting_config_t *config);
 esp_err_t dc_lighting_set(dc_rgb_t color, dc_lighting_effect_t effect, uint8_t speed);
+esp_err_t dc_lighting_set_brightness(uint8_t brightness);
+esp_err_t dc_lighting_set_output_reverse(uint8_t output, bool reverse);
 /* Progress is normalized to 0..1. A negative value means unavailable. */
 esp_err_t dc_lighting_set_progress(float progress);
 esp_err_t dc_lighting_off(void);

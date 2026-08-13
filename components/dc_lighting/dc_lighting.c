@@ -143,6 +143,20 @@ esp_err_t dc_lighting_set(dc_rgb_t color, dc_lighting_effect_t effect, uint8_t s
     return ESP_OK;
 }
 
+esp_err_t dc_lighting_set_brightness(uint8_t brightness)
+{
+    if (!s_lock) return ESP_ERR_INVALID_STATE;
+    xSemaphoreTake(s_lock, portMAX_DELAY); s_brightness = brightness; xSemaphoreGive(s_lock);
+    return ESP_OK;
+}
+
+esp_err_t dc_lighting_set_output_reverse(uint8_t output, bool reverse)
+{
+    if (!s_lock || output >= s_count) return ESP_ERR_INVALID_ARG;
+    xSemaphoreTake(s_lock, portMAX_DELAY); s_output[output].reverse = reverse; xSemaphoreGive(s_lock);
+    return ESP_OK;
+}
+
 esp_err_t dc_lighting_set_progress(float progress)
 {
     if (!s_lock) return ESP_ERR_INVALID_STATE;
