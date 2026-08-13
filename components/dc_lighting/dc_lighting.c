@@ -16,6 +16,7 @@ static uint8_t s_count, s_brightness = 255, s_fps = 30, s_speed;
 static uint16_t s_total_pixels;
 static dc_lighting_layout_t s_layout;
 static float s_progress = -1.0f;
+static float s_audio_level;
 static dc_rgb_t s_color;
 static dc_lighting_effect_t s_effect;
 static SemaphoreHandle_t s_lock;
@@ -85,6 +86,14 @@ static void frame(uint32_t tick)
                 bool lit = s_progress >= 0.0f && position < (uint16_t)(s_progress * pixels);
                 color = lit ? s_color : (dc_rgb_t){0, 0, 0};
                 pixel_level = lit ? s_brightness : 255;
+            } else if (s_effect == DC_LIGHTING_AUDIO_METER) {
+                float meter = s_audio_level;
+                uint16_t lit = meter <= 0.0f ? 0 : (uint16_t)(meter * pixels + 0.999f);
+                bool on = position < lit;
+                /* HSV runs red -> yellow -> green -> cyan -> blue. Reverse
+                 * it so a quiet room is blue and a loud one is red. */
+                hsv((uint16_t)((1.0f - meter) * 43690.0f), &color);
+                pixel_level = on ? s_brightness : 0;
             }
             uint16_t index = s_output[i].reverse ? s_output[i].pixels - 1 - p : p;
             led_strip_set_pixel(s_strip[i], index, scale(color.r, pixel_level), scale(color.g, pixel_level), scale(color.b, pixel_level));
@@ -162,6 +171,15 @@ esp_err_t dc_lighting_set_progress(float progress)
     if (!s_lock) return ESP_ERR_INVALID_STATE;
     if (progress > 1.0f) progress = 1.0f;
     xSemaphoreTake(s_lock, portMAX_DELAY); s_progress = progress; xSemaphoreGive(s_lock);
+    return ESP_OK;
+}
+
+esp_err_t dc_lighting_set_audio_level(float level)
+{
+    if (!s_lock) return ESP_ERR_INVALID_STATE;
+    if (level < 0.0f) level = 0.0f;
+    if (level > 1.0f) level = 1.0f;
+    xSemaphoreTake(s_lock, portMAX_DELAY); s_audio_level = level; xSemaphoreGive(s_lock);
     return ESP_OK;
 }
 
