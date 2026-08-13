@@ -23,6 +23,8 @@ typedef enum {
     DC_LIGHTING_CYCLE = 7,
     DC_LIGHTING_WAVE = 8,
     DC_LIGHTING_MARQUEE = 9,
+    /* A level meter: length and hue follow a normalized audio level. */
+    DC_LIGHTING_AUDIO_METER = 10,
 } dc_lighting_effect_t;
 
 /* Compatibility spelling for products which called Strobe "blink". */
@@ -64,4 +66,6 @@ esp_err_t dc_lighting_set_brightness(uint8_t brightness);
 esp_err_t dc_lighting_set_output_reverse(uint8_t output, bool reverse);
 /* Progress is normalized to 0..1. A negative value means unavailable. */
 esp_err_t dc_lighting_set_progress(float progress);
+/* Audio level is normalized to 0..1 and consumed by DC_LIGHTING_AUDIO_METER. */
+esp_err_t dc_lighting_set_audio_level(float level);
 esp_err_t dc_lighting_off(void);
