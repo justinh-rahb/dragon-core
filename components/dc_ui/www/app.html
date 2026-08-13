@@ -157,7 +157,9 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
 .grid{
   flex: 1; min-height: 0; display: grid;
   grid-template-columns: minmax(0, 1.18fr) minmax(180px, .82fr);
-  grid-template-rows: minmax(0, 1fr) minmax(88px, .55fr); gap: 9px;
+  /* row 2 (Quick controls) is content-height now that Filter + presets share one
+     row — no wasted space; the freed height goes to row 1 (chamber + status). */
+  grid-template-rows: minmax(0, 1fr) auto; gap: 9px;
 }
 .card{ position: relative; min-width: 0; min-height: 0; padding: 11px; overflow: hidden;
   border: 1px solid var(--border); border-radius: 5px; background: var(--card); }
@@ -199,7 +201,10 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
 .temp-chart .line-ch{ stroke: var(--viz-series-1); }
 .temp-chart .line-ptc{ stroke: var(--viz-series-3); }
 
-.status-card{ display: flex; flex-direction: column; gap: 8px; }
+.status-card{ display: flex; flex-direction: column; gap: 5px; }
+/* Default: heading sits above the state (normal block flow). On a really small
+   card, put the "System status" heading and the state (● Idle) on one line. */
+@container (max-width: 440px){ .status-head{ display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; } }
 .state{ display: flex; align-items: center; gap: 8px; margin-top: 2px; font-size: 17px; font-weight: 700; }
 .state-light{ width: 11px; height: 11px; flex: none; border-radius: 50%; background: var(--muted-foreground); }
 .app[data-state="heating"] .state-light,
@@ -208,8 +213,8 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
 .app[data-state="filtering"] .state-light,
 .app[data-state="cooldown"] .state-light{ background: var(--viz-series-3); }
 .app[data-state="fault"] .state-light{ background: var(--destructive); }
-.summary{ min-height: 18px; color: var(--muted-foreground); font-size: 12px; }
-.status-detail{ margin: 4px 0; min-height: 0; flex: 1 1 auto; overflow: auto;
+.summary{ min-height: 0; color: var(--muted-foreground); font-size: 12px; }
+.status-detail{ margin: 2px 0; min-height: 0; flex: 1 1 auto; overflow: auto;
   display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
 .status-detail > div{ display: flex; align-items: flex-start; justify-content: space-between;
   gap: 10px; padding: 3px 0; border-bottom: 1px solid var(--border); }
@@ -219,11 +224,28 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
    desktop column or compact tile) still shows the whole line, e.g. the Printer
    row "connected · bed 26 °C". Wide cards keep it on one line. */
 .status-detail dd{ margin: 0; text-align: right; min-width: 0; overflow-wrap: anywhere; }
+/* When the app (and thus the narrower status column) is small, stack each status
+   row — value under the label, like the mobile layout — so a long value such as the
+   Bambu printer row never gets squeezed into a one-character-per-line column. */
+@container (max-width: 860px){
+  .status-detail > div{ flex-direction: column; align-items: stretch; gap: 0; }
+  .status-detail dd{ text-align: left; }
+  /* Filament is always a short value — keep it on one line rather than stacking. */
+  #db-filament-row{ flex-direction: row; align-items: baseline; gap: 10px; }
+  #db-filament-row dd{ text-align: right; }
+}
 .actions{ display: flex; gap: 6px; margin-top: auto; }
 .actions .btn{ flex: 1; }
 
 .quick-card{ grid-column: 1 / -1; padding-bottom: 8px; }
-.quick-actions{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 10px; }
+.quick-actions{ display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-top: 10px; }
+/* Narrow window: Filter collapses to just its fan icon and the four presets take
+   the freed width, so all five controls still fit one row without clipping 70 °C. */
+@container (max-width: 600px){
+  .quick-actions{ grid-template-columns: auto repeat(4, 1fr); }
+  #db-filter-label{ display: none; }                              /* Filter -> fan icon only */
+  .quick-actions .btn[data-quick-temp] svg.icon{ display: none; } /* presets -> text only */
+}
 .quick-actions .btn{ display: flex; justify-content: center; align-items: center; gap: 6px; }
 
 .page-only{ display: none; flex: 1; min-height: 0; padding: 18px; overflow: auto;
@@ -279,9 +301,9 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
 
 /* ---- U3 Settings: a single scrolling column of sections; each section is a
    bordered block using the existing token kit. ---- */
-.settings{ flex-direction: column; gap: 12px; max-width: 560px; width: 100%; }
-.set-card{ display: flex; flex-direction: column; gap: 9px;
-  padding: 12px; border: 1px solid var(--border); border-radius: 5px;
+.settings{ flex-direction: column; gap: 8px; max-width: 560px; width: 100%; }
+.set-card{ display: flex; flex-direction: column; gap: 7px;
+  padding: 10px 11px; border: 1px solid var(--border); border-radius: 5px;
   background: color-mix(in oklab, var(--foreground) 3%, transparent); }
 .set-card h3{ margin: 0; color: var(--muted-foreground); font-size: 11px;
   font-weight: 600; text-transform: uppercase; }
@@ -393,7 +415,22 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
   .app-version{ display: block; }
   .chamber-reading strong{ font-size: 32px; }
 }
+/* Short DESKTOP window (mouse): the dashboard grows to its natural height and
+   scrolls, so the chamber, status and quick controls stay visible up top and the
+   zones sit below the fold — instead of cramming the top cards to nothing. Gated
+   to pointer:fine so it never touches the touch compact tile / phone stack (which
+   have their own layouts, and where this would push the Stop button out of view).
+   Tall windows keep the fixed fill layout above. */
+@media (pointer: fine) and (max-height: 720px){
+  .main{ overflow-y: auto; }
+  .grid{ flex: 0 0 auto; grid-template-rows: auto auto; grid-auto-rows: auto; }
+  .temp-card{ min-height: 210px; }
+}
 .zones-list{ display: grid; grid-template-columns: 1fr auto; gap: 7px 12px; align-items: center; margin-top: 10px; }
+/* Built-in zones: two per row (label|input | label|input) so the 6 fixed types
+   fill 3 rows instead of 6, reclaiming the wasted vertical space. */
+#zones-list{ grid-template-columns: 1fr auto 1fr auto; column-gap: 18px; }
+@container (max-width: 560px){ #zones-list{ grid-template-columns: 1fr auto; column-gap: 12px; } }
 #zones-custom-list{ grid-template-columns: 1fr auto auto; }
 .zones-list .zone-lbl{ color: var(--foreground); font-size: 13px; display: flex; flex-direction: column; }
 .zones-list .zone-def{ color: var(--muted-foreground); font-size: 11px; }
@@ -404,8 +441,12 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
 .zones-list .zone-rm{ background: none; border: none; color: var(--muted-foreground); cursor: pointer;
   padding: 4px; display: inline-flex; border-radius: var(--radius-lg); }
 .zones-list .zone-rm:hover{ color: var(--destructive, #e5484d); background: var(--input); }
-.zones-add{ display: flex; gap: 8px; align-items: center; margin-top: 12px; }
-.zones-add .zone-in-name{ width: auto; flex: 1; text-align: left; }
+.zones-add{ display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; }
+.zones-add .zone-in-name{ width: auto; flex: 1 1 6em; min-width: 0; text-align: left; }
+.preset-edit{ display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 6px; }
+/* Narrow window: drop Custom Profiles below Filament Zones (each full-width) so the
+   add row (name + target + Add) has room instead of overflowing a cramped column. */
+@container (max-width: 600px){ #zones-card, #zones-custom-card{ grid-column: 1 / -1; } }
 .zones-empty{ color: var(--muted-foreground); font-size: 13px; margin-top: 10px; }
 /* ---- DragonVent product surface. The shared shell and tokens stay familiar,
    while the green/teal accent and airflow diagram make this a vent controller,
@@ -599,8 +640,10 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
         </section>
 
         <section class="card status-card">
-          <h3>System status</h3>
-          <div class="state"><i class="state-light"></i><span id="db-status">--</span></div>
+          <div class="status-head">
+            <h3>Status</h3>
+            <div class="state"><i class="state-light"></i><span id="db-status">--</span></div>
+          </div>
           <div class="summary" id="db-summary"></div>
           <dl class="status-detail">
             <div><dt>Fan</dt><dd id="db-fan">--</dd></div>
@@ -609,7 +652,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
             <div id="db-drying-row" hidden><dt>Drying</dt><dd id="db-drying">--</dd></div>
             <div><dt id="db-printer-label">Printer</dt><dd id="db-printer">--</dd></div>
             <div id="db-filament-row" hidden><dt>Filament</dt><dd id="db-filament">--</dd></div>
-            <div><dt>Fault</dt><dd id="db-fault">--</dd></div>
+            <div id="db-fault-row" hidden><dt>Fault</dt><dd id="db-fault">--</dd></div>
           </dl>
           <div class="actions">
             <button class="btn btn-sm" type="button" id="db-clear" hidden><svg class="icon"><use href="#i-refresh"/></svg> Clear fault</button>
@@ -619,34 +662,15 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
 
         <section class="card quick-card" data-capability="power_on">
           <h3>Quick controls</h3>
+          <!-- One row: the filter blower (fan-only, out-of-band — works in any mode,
+               heater untouched; mirrors the Klipper fan_generic control) first, then
+               the temperature presets. -->
           <div class="quick-actions">
-            <button class="btn" type="button" data-quick-temp="40"><svg class="icon"><use href="#i-thermometer"/></svg> 40 °C</button>
+            <button class="btn" type="button" id="db-filter" aria-pressed="false"><svg class="icon"><use href="#i-fan"/></svg> <span id="db-filter-label">Filter</span></button>
             <button class="btn" type="button" data-quick-temp="50"><svg class="icon"><use href="#i-thermometer"/></svg> 50 °C</button>
+            <button class="btn" type="button" data-quick-temp="55"><svg class="icon"><use href="#i-thermometer"/></svg> 55 °C</button>
             <button class="btn" type="button" data-quick-temp="60"><svg class="icon"><use href="#i-thermometer"/></svg> 60 °C</button>
-            <button class="btn" type="button" data-quick-temp="70"><svg class="icon"><use href="#i-thermometer"/></svg> 70 °C</button>
-          </div>
-          <!-- Manual filtration blower: fan-only, out-of-band (works in any mode,
-               heater untouched). Mirrors the Klipper fan_generic control. -->
-          <div class="quick-actions">
-            <button class="btn" type="button" id="db-filter" aria-pressed="false"><svg class="icon"><use href="#i-fan"/></svg> <span id="db-filter-label">Filtration</span></button>
-          </div>
-        </section>
-        <!-- Filament chamber zones (Bambu only): shown when the control source is
-             Bambu; edits apply live via /api/v2/zones (no reboot). Two cards: the
-             built-in filament types (left) and user-added custom profiles (right). -->
-        <section class="card zones-card" id="zones-card" hidden>
-          <h3><svg class="icon"><use href="#i-spool"/></svg> Filament zones</h3>
-          <p class="muted">Chamber target by filament while the heater is in <b>AUTO</b> and a Bambu print is running (°C, 0 = off). Zones do nothing in Manual/Off.</p>
-          <div id="zones-list" class="zones-list"></div>
-        </section>
-        <section class="card zones-card" id="zones-custom-card" hidden>
-          <h3><svg class="icon"><use href="#i-spool"/></svg> Custom profiles</h3>
-          <p class="muted">Add profiles for filaments not in the built-in set (PA, PCTG, …). Like the built-in zones, custom profiles only take effect while the heater is in <b>AUTO</b> and a Bambu print is running — they do nothing in Manual/Off.</p>
-          <div id="zones-custom-list" class="zones-list"></div>
-          <div class="zones-add">
-            <input id="zc-name" class="zone-in zone-in-name" type="text" placeholder="name" maxlength="11" autocomplete="off">
-            <input id="zc-temp" class="zone-in" type="number" min="0" max="70" step="1" placeholder="°C">
-            <button class="btn btn-sm" type="button" id="zc-add"><svg class="icon"><use href="#i-plus"/></svg> Add</button>
+            <button class="btn" type="button" data-quick-temp="65"><svg class="icon"><use href="#i-thermometer"/></svg> 65 °C</button>
           </div>
         </section>
       </div>
@@ -684,8 +708,8 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
 
       <!-- Automatic: follow the printer bed above a threshold (auto command). -->
       <section class="page-only mode-controls" data-page-content="auto" data-capability="auto">
-        <p><strong>Automatic mode:</strong> follow the printer bed — arm a chamber target that engages once the bed passes a threshold. Requires Moonraker.</p>
-        <div class="ctl-group">
+        <p><strong>Automatic mode:</strong> while a print runs, the chamber follows the loaded filament's profile — set the per-filament targets in <strong>Filament Zones</strong> on the dashboard. With no print, or a filament that has no zone set, the chamber stays idle. Requires a connected printer (Klipper or Bambu).</p>
+        <div class="ctl-group" hidden>
           <div class="ctl-head">
             <span class="form-label">Chamber target</span>
             <span class="ctl-hint" data-maxhint>30–70 °C</span>
@@ -697,7 +721,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
           </div>
           <input class="form-range" id="a-range" type="range" min="30" max="70" step="1" value="50" aria-label="Chamber target">
         </div>
-        <div class="ctl-group">
+        <div class="ctl-group" hidden>
           <div class="ctl-head">
             <span class="form-label">Bed threshold</span>
             <span class="ctl-hint">40–120 °C</span>
@@ -711,7 +735,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
         </div>
         <div class="mode-status" id="a-status"></div>
         <div class="mode-footer">
-          <div class="mode-action"><button class="btn btn-primary btn-block" type="button" id="a-action"><svg class="icon"><use href="#i-refresh"/></svg> <span>Follow printer bed</span></button></div>
+          <div class="mode-action"><button class="btn btn-primary btn-block" type="button" id="a-action"><svg class="icon"><use href="#i-refresh"/></svg> <span>Follow filament profile</span></button></div>
           <div class="mode-feedback" id="a-msg" role="status" aria-live="polite"></div>
         </div>
       </section>
@@ -761,6 +785,38 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
            /api/v2/calibration, /api/v2/token, /api/v2/logs, /api/v2/info,
            /api/v2/restart, /api/v2/factory-reset. -->
       <section class="page-only settings" data-page-content="settings">
+
+        <!-- Dashboard quick-control presets (GET/POST /api/v2/presets). -->
+        <div class="set-card">
+          <h3>Quick-control presets</h3>
+          <p class="set-note">The four one-tap temperatures on the dashboard (°C).</p>
+          <div class="preset-edit">
+            <input class="zone-in" type="number" min="0" max="70" step="1" id="s-preset-0" aria-label="Preset 1">
+            <input class="zone-in" type="number" min="0" max="70" step="1" id="s-preset-1" aria-label="Preset 2">
+            <input class="zone-in" type="number" min="0" max="70" step="1" id="s-preset-2" aria-label="Preset 3">
+            <input class="zone-in" type="number" min="0" max="70" step="1" id="s-preset-3" aria-label="Preset 4">
+            <button class="btn btn-primary" type="button" id="s-preset-save">Save</button>
+          </div>
+          <div class="mode-feedback" id="s-preset-msg" role="status" aria-live="polite"></div>
+        </div>
+
+        <!-- Filament chamber zones: shown when the control source follows filament
+             profiles (Bambu or Klipper). Edits apply live via /api/v2/zones (no reboot). -->
+        <div class="set-card zones-card" id="zones-card" hidden>
+          <h3><svg class="icon"><use href="#i-spool"/></svg> Filament zones</h3>
+          <p class="set-note">Chamber target per filament while in <b>AUTO</b> (°C, 0 = off). Disabled in Manual/Off.</p>
+          <div id="zones-list" class="zones-list"></div>
+        </div>
+        <div class="set-card zones-card" id="zones-custom-card" hidden>
+          <h3><svg class="icon"><use href="#i-spool"/></svg> Custom profiles</h3>
+          <p class="set-note">Add profiles for filaments not in the built-in set (PCTG, PVA, …). A custom named after a built-in overrides it.</p>
+          <div id="zones-custom-list" class="zones-list"></div>
+          <div class="zones-add">
+            <input id="zc-name" class="zone-in zone-in-name" type="text" placeholder="name" maxlength="11" autocomplete="off">
+            <input id="zc-temp" class="zone-in" type="number" min="0" max="70" step="1" placeholder="°C">
+            <button class="btn btn-sm" type="button" id="zc-add"><svg class="icon"><use href="#i-plus"/></svg> Add</button>
+          </div>
+        </div>
 
         <!-- Safety limits & watchdog (GET/POST /settings). -->
         <div class="set-card">
@@ -950,7 +1006,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
             <div id="s-slot-row" hidden><dt>Inactive slot</dt><dd id="s-slot">--</dd></div>
           </dl>
           <div class="settings-links">
-            <button class="btn btn-primary btn-block" type="button" id="s-fw-update"><svg class="icon"><use href="#i-download"/></svg> Firmware update</button>
+            <button class="btn btn-primary btn-block" type="button" id="s-fw-update"><svg class="icon"><use href="#i-settings"/></svg> Open device setup</button>
           </div>
           <div class="set-row" style="margin-top:4px">
             <button class="btn" type="button" id="s-restart"><svg class="icon"><use href="#i-power"/></svg> Restart</button>
@@ -959,7 +1015,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
           <div class="set-row" id="s-bootslot-row" hidden style="margin-top:4px">
             <button class="btn" type="button" id="s-bootslot"><svg class="icon"><use href="#i-refresh"/></svg> Boot inactive slot</button>
           </div>
-          <p class="set-note">Restart and factory reset are refused while the heater is on — turn it off first. Factory reset erases Wi-Fi credentials, the Moonraker host, the control token and the safety limits, then reboots to AP provisioning. <b>Boot inactive slot</b> reboots into whatever firmware is in the other OTA slot (shown above) — use it to revert to stock or roll back a version.</p>
+          <p class="set-note">Firmware update lives in <b>Device setup</b>. Restart and factory reset are refused while the heater is on — turn it off first. Factory reset erases Wi-Fi credentials, the Moonraker host, the control token and the safety limits, then reboots to AP provisioning. <b>Boot inactive slot</b> reboots into whatever firmware is in the other OTA slot (shown above) — use it to revert to stock or roll back a version.</p>
           <div class="mode-feedback" id="s-maint-msg" role="status" aria-live="polite"></div>
         </div>
       </section>
@@ -1374,7 +1430,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
   $('dc-wifi-save').addEventListener('click',function(){var ssid=$('dc-wifi-network').value||$('dc-wifi-manual').value.trim();setupMessage('dc-wifi-msg','Saving…');dcRequest('/api/v1/provisioning/wifi',{ssid:ssid,password:$('dc-wifi-password').value}).then(function(){setupMessage('dc-wifi-msg','Saved. Rebooting…');}).catch(function(j){setupMessage('dc-wifi-msg',j.error||'Could not save Wi-Fi.',true);});});
   $('dc-ap-save').addEventListener('click',function(){setupMessage('dc-ap-msg','Saving…');dcRequest('/api/v1/provisioning/ap',{ssid:$('dc-ap-ssid').value,password:$('dc-ap-password').value,ip:$('dc-ap-ip').value,enabled:$('dc-ap-enabled').value==='1'}).then(function(){setupMessage('dc-ap-msg','Saved. Rebooting…');}).catch(function(j){setupMessage('dc-ap-msg',j.error||'Could not save AP settings.',true);});});
   $('dc-load-logs').addEventListener('click',function(){dcFetchJson('/api/v1/system/logs',{cache:'no-store'}).then(function(j){$('dc-logs').textContent=(j.entries||[]).map(function(e){return '['+e.ms+' ms] '+e.text;}).join('\n');}).catch(function(){setupMessage('dc-system-msg','Could not load logs.',true);});});
-  var sFwBtn=$('s-fw-update'); if(sFwBtn) sFwBtn.addEventListener('click',function(){openProvisioning('dc-maintenance');});
+  var sFwBtn=$('s-fw-update'); if(sFwBtn) sFwBtn.addEventListener('click',function(){openProvisioning();});
   $('dc-ota-upload').addEventListener('click',function(){var f=$('dc-ota-file').files[0];if(!f){setupMessage('dc-system-msg','Choose a firmware .bin first.',true);return;}otaUpload(f,false);});
   /* XHR (not fetch) so upload.onprogress can show a live %; the device writes bytes to
      flash as it receives them, so upload progress tracks flashing. On success, poll the
@@ -1576,7 +1632,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
   function summary(st, s){
     if(st==='fault') return (s.safety.inhibited?'Inhibited: ':'Fault: ')+(s.safety.reason||'unknown');
     if(st==='drying'){ var m=Math.round((s.drying.remaining_seconds||0)/60); return 'Filament drying — '+m+' min left. Safety chain healthy.'; }
-    if(st==='waiting') return 'Armed. Waiting for the printer bed threshold.';
+    if(st==='waiting') return 'Armed. Waiting for a print with a filament profile.';
     if(st==='heating') return s.heater.output ? 'Output active. Safety chain healthy.' : 'Heater demand — waiting on the safety chain.';
     if(st==='cooldown') return 'Residual-heat purge — fan clearing heat, heater off.';
     if(st==='filtering') return 'Fan-only filtration — heater off, monitoring active.';
@@ -1894,13 +1950,13 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
       fbtn.title = filtLocked ? 'Filtration is locked while heating or cooling down — use Stop'
                  : filtOn ? 'Filtration on — use Stop to turn it off' : '';
     }
-    u('db-filter-label', 'Filtration');
+    u('db-filter-label', 'Filter');
     var autoRow = s.mode==='auto';
     $('db-auto-row').hidden = !autoRow;
     if(autoRow) u('db-auto', s.environment.auto_engaged
-      ? 'heating @ bed ≥'+Math.round(s.environment.auto_bed_threshold_c)+' °C'
+      ? 'heating to filament profile · '+Math.round(s.target.effective_c)+' °C'
       : s.environment.auto_filtering ? 'filtering (fan only)'
-      : 'waiting @ bed ≥'+Math.round(s.environment.auto_bed_threshold_c)+' °C');
+      : 'waiting for a print');
     var dryRow = s.drying.active;
     $('db-drying-row').hidden = !dryRow;
     if(dryRow) u('db-drying', fmtDur(s.drying.remaining_seconds)+' left');
@@ -1909,14 +1965,19 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
        so relabel the row and show the source instead of a misleading "not connected". */
     var src = s.environment.control_source || 'klipper';
     var isBambu = (src==='bambu');
+    /* Filament chamber zones apply to any bed source that reports the active
+       filament — Bambu and Klipper (Moonraker). */
+    var usesZones = isBambu || (src==='klipper');
     var zc = document.getElementById('zones-card');
     var zcc = document.getElementById('zones-custom-card');
-    if(zc){ zc.hidden = !isBambu; if(isBambu) loadZones(); }
-    if(zcc) zcc.hidden = !isBambu;
-    /* Bambu-only: show the active print's filament in the status card. */
+    if(zc){ zc.hidden = !usesZones; if(usesZones) loadZones(); }
+    if(zcc) zcc.hidden = !usesZones;
+    /* Show the active print's filament in the status card (Bambu bambu_filament,
+       Klipper material). */
     var frow = $('db-filament-row');
     if(frow){
-      var fila = isBambu && s.environment.bambu_printing ? s.environment.bambu_filament : null;
+      var fila = isBambu ? (s.environment.bambu_printing ? s.environment.bambu_filament : null)
+                         : (s.environment.material || null);
       frow.hidden = !fila;
       if(fila) u('db-filament', fila);
     }
@@ -1933,8 +1994,10 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
         ? 'connected'+(s.environment.bed_temperature_c!=null ? ' · bed '+Math.round(s.environment.bed_temperature_c)+' °C' : '')
         : 'not connected');
     }
-    u('db-fault', s.safety.inhibited ? ('inhibited: '+(s.safety.reason||'unknown'))
-      : s.safety.fault_latched ? ('latched: '+(s.safety.reason||'unknown')) : 'none');
+    var hasFault = s.safety.inhibited || s.safety.fault_latched;
+    $('db-fault-row').hidden = !hasFault;   // only show Fault when there is one
+    if(hasFault) u('db-fault', s.safety.inhibited ? ('inhibited: '+(s.safety.reason||'unknown'))
+      : ('latched: '+(s.safety.reason||'unknown')));
 
     /* progress bar: chamber vs. effective target */
     var pct=0;
@@ -2032,10 +2095,33 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     });
   });
 
-  /* Quick presets -> power_on at the chosen target. */
+  /* Quick presets -> power_on at the chosen target. The temps are user-customizable
+     (GET/POST /api/v2/presets); the click reads data-quick-temp live, so applying
+     saved presets just rewrites each button's value + label. */
   document.querySelectorAll('[data-quick-temp]').forEach(function(b){
     b.addEventListener('click', function(){ powerOn(Number(b.dataset.quickTemp)); });
   });
+  function applyPresets(list){
+    if(!Array.isArray(list)) return;
+    document.querySelectorAll('.quick-actions .btn[data-quick-temp]').forEach(function(b,i){
+      if(list[i]==null) return;
+      var t=Number(list[i]);
+      b.dataset.quickTemp=String(t);
+      b.innerHTML='<svg class="icon"><use href="#i-thermometer"/></svg> '+t+' °C';
+    });
+  }
+  function fillPresetFields(list){ if(!Array.isArray(list))return; for(var i=0;i<4;i++){ var el=$('s-preset-'+i); if(el&&list[i]!=null) el.value=list[i]; } }
+  function loadPresets(){ return fetch('/api/v2/presets',{cache:'no-store'}).then(function(r){return r.json();}).then(function(d){ applyPresets(d.presets); fillPresetFields(d.presets); return d.presets; }); }
+  var psave=$('s-preset-save');
+  if(psave) psave.addEventListener('click', function(){
+    var vals=[]; for(var i=0;i<4;i++){ vals.push(Math.max(0, Math.min(70, Math.round(Number($('s-preset-'+i).value)||0)))); }
+    $('s-preset-msg').textContent='Saving…';
+    fetch('/api/v2/presets',{method:'POST',headers:hdr(),body:JSON.stringify({presets:vals})})
+      .then(function(r){ if(!r.ok) throw 0; return r.json(); })
+      .then(function(d){ applyPresets(d.presets); fillPresetFields(d.presets); $('s-preset-msg').textContent='Presets saved.'; })
+      .catch(function(){ $('s-preset-msg').textContent='Could not save presets.'; });
+  });
+  loadPresets().catch(function(){});
 
   /* Status-area action: Stop -> off (the policy has no pause state; per #19 the
      status area is Stop-only). */
@@ -2103,13 +2189,14 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
   }
   function renderAuto(s){
     var armed = s.mode==='auto', eng = s.environment.auto_engaged;
-    setAction('a-action', armed?'Disengage':'Follow printer bed', armed?'#i-square':'#i-refresh', armed);
-    var bed = s.environment.bed_temperature_c;
-    var bedTxt = bed==null ? '--' : Number(bed).toFixed(1)+' °C';
-    if(!s.environment.moonraker_connected) setStatus('a-status', 'Moonraker not connected — AUTO needs a printer link.', 'is-warn');
-    else if(eng) setStatus('a-status', 'Engaged — following bed ('+bedTxt+').', 'is-live');
-    else if(armed) setStatus('a-status', 'Armed — bed '+bedTxt+', engages at '+Math.round(s.environment.auto_bed_threshold_c)+' °C.', 'is-live');
-    else setStatus('a-status', 'Bed '+bedTxt+'. Not armed.');
+    setAction('a-action', armed?'Disengage':'Follow filament profile', armed?'#i-square':'#i-refresh', armed);
+    var mat = s.environment.material;
+    var tgt = Math.round(s.target.effective_c);
+    if(s.environment.control_source==='klipper' && !s.environment.moonraker_connected)
+      setStatus('a-status', 'Moonraker not connected — AUTO needs a printer link.', 'is-warn');
+    else if(eng) setStatus('a-status', 'Engaged — heating to '+(mat?mat+' ':'')+'profile ('+tgt+' °C).', 'is-live');
+    else if(armed) setStatus('a-status', 'Armed — waiting for a print with a filament profile.', 'is-live');
+    else setStatus('a-status', 'Not armed.');
   }
   function renderDry(s){
     var active = s.drying.active;

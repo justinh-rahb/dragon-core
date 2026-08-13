@@ -352,13 +352,26 @@ esp_err_t dc_bambu_clear_config(void)
 
 // ---------- filament chamber zones (issue #64, Bambu only) ----------
 
-// Built-in filament types: fixed names + per-key NVS target override + a default
+// Built-in filament types: display name + per-key NVS target override + a default
 // (shown as the UI's "default N" hint). PLA/TPU off (a hot chamber hurts PLA);
-// PETG/ABS/ASA/PC want warmth for adhesion / reduced warping.
-static const char *const ZONE_NAMES[DC_BAMBU_ZONE_COUNT] = { "PLA", "PETG", "ABS", "ASA", "PC", "TPU" };
-static const char *const ZONE_KEYS [DC_BAMBU_ZONE_COUNT] = { "zone_pla", "zone_petg", "zone_abs", "zone_asa", "zone_pc", "zone_tpu" };
-//                                                            PLA PETG ABS ASA PC  TPU
-static const uint8_t     ZONE_DEF  [DC_BAMBU_ZONE_COUNT] = {  0,  40, 55, 55, 60,  0 };
+// PETG/ABS-ASA/PA/PC want warmth for adhesion / reduced warping. ABS and ASA share
+// one combined zone (identical chamber needs); to diverge, add a custom ABS or ASA
+// profile — it overrides the combined default (see dc_bambu_zone_target).
+static const char *const ZONE_NAMES[DC_BAMBU_ZONE_COUNT] = { "PLA", "PETG", "ABS/ASA", "PA", "PC", "TPU" };
+static const char *const ZONE_KEYS [DC_BAMBU_ZONE_COUNT] = { "zone_pla", "zone_petg", "zone_abs", "zone_pa", "zone_pc", "zone_tpu" };
+//                                                            PLA PETG ABS/ASA PA PC  TPU
+static const uint8_t     ZONE_DEF  [DC_BAMBU_ZONE_COUNT] = {  0,  40,   55,    50, 60,  0 };
+
+// Prefix(es) a Bambu filament report is matched against, per built-in. The combined
+// zone matches BOTH "ABS…" and "ASA…"; the rest match their own name. NULL-terminated.
+static const char *const ZONE_MATCH[DC_BAMBU_ZONE_COUNT][3] = {
+    { "PLA",  NULL },
+    { "PETG", NULL },
+    { "ABS",  "ASA", NULL },   // combined ABS/ASA
+    { "PA",   NULL },
+    { "PC",   NULL },
+    { "TPU",  NULL },
+};
 
 // User custom profiles — persisted together as one NVS blob "zone_custom".
 typedef struct { char name[12]; uint8_t target_c; } custom_zone_t;
@@ -404,12 +417,17 @@ uint8_t dc_bambu_zone_target(const char *filament)
 {
     if (!s_zones_loaded) zones_load();
     if (!filament || !filament[0]) return 0;
-    // Longest-prefix match over built-ins + customs (a custom "PETG-CF" beats "PETG").
-    const char *names[DC_BAMBU_ZONE_MAX];
-    uint8_t     temps[DC_BAMBU_ZONE_MAX];
+    // Longest-prefix match over customs + built-in aliases (a custom "PETG-CF" beats
+    // "PETG"). Customs are listed FIRST so that on an EQUAL-length tie the custom
+    // wins — this is what lets a custom "ABS"/"ASA" override the combined built-in
+    // (the matcher keeps the first of equal length). Built-ins expand to their match
+    // prefixes, so the combined zone contributes both "ABS" and "ASA".
+    const char *names[DC_BAMBU_CUSTOM_MAX + DC_BAMBU_ZONE_COUNT + 2];
+    uint8_t     temps[DC_BAMBU_CUSTOM_MAX + DC_BAMBU_ZONE_COUNT + 2];
     int n = 0;
-    for (int i = 0; i < DC_BAMBU_ZONE_COUNT; i++) { names[n] = ZONE_NAMES[i];   temps[n] = s_zone_c[i];        n++; }
-    for (int i = 0; i < s_custom_n;          i++) { names[n] = s_custom[i].name; temps[n] = s_custom[i].target_c; n++; }
+    for (int i = 0; i < s_custom_n; i++) { names[n] = s_custom[i].name; temps[n] = s_custom[i].target_c; n++; }
+    for (int i = 0; i < DC_BAMBU_ZONE_COUNT; i++)
+        for (int a = 0; ZONE_MATCH[i][a]; a++) { names[n] = ZONE_MATCH[i][a]; temps[n] = s_zone_c[i]; n++; }
     int idx = dc_bambu_zone_match(filament, names, n);
     return idx < 0 ? 0 : temps[idx];
 }

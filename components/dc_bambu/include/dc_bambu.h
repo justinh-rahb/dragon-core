@@ -90,9 +90,11 @@ int dc_bambu_discover_get(dc_bambu_found_t *out, int max);
 // chamber (e.g. PETG -> 40 C) without any bed-threshold AUTO. Klipper doesn't use
 // this — it drives the chamber via M141/M191. A zone target of 0 = "no zone" (off).
 //
-// There are 6 BUILT-IN filament types (fixed defaults, editable target) plus up to
-// DC_BAMBU_CUSTOM_MAX USER profiles the operator can add/remove for filaments not in
-// the built-in set (PA, PCTG, ...). get_all returns the built-ins first, then customs.
+// There are 6 BUILT-IN filament types (fixed defaults, editable target) — PLA, PETG,
+// the combined ABS/ASA, PA, PC, TPU — plus up to DC_BAMBU_CUSTOM_MAX USER profiles the
+// operator can add/remove for filaments not in the built-in set (PCTG, PVA, ...), or to
+// override a built-in for a specific type (e.g. a custom "ASA" beats the ABS/ASA zone).
+// get_all returns the built-ins first, then customs.
 #define DC_BAMBU_ZONE_COUNT  6                                        // built-in types
 #define DC_BAMBU_CUSTOM_MAX  8                                        // user profiles
 #define DC_BAMBU_ZONE_MAX    (DC_BAMBU_ZONE_COUNT + DC_BAMBU_CUSTOM_MAX)
