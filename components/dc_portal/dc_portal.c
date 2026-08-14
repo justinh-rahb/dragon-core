@@ -529,6 +529,16 @@ static esp_err_t register_handler(const httpd_uri_t *handler)
     return err;
 }
 
+// Number of routes in the builtins[] table below; asserted against it at compile
+// time so the two can never drift.
+#define DC_PORTAL_BUILTIN_ROUTE_COUNT 13
+
+// Slots held open for a product that registers through register_product_routes.
+// Those registrations are invisible to the sizing above, so this is a guess —
+// deliberately generous, because a handler slot costs a few bytes and running out
+// takes the whole portal down.
+#define DC_PORTAL_CALLBACK_ROUTE_RESERVE 8
+
 esp_err_t dc_portal_start(const dc_portal_config_t *config)
 {
     if (!config || !config->product || !config->display_name) return ESP_ERR_INVALID_ARG;
@@ -538,7 +548,20 @@ esp_err_t dc_portal_start(const dc_portal_config_t *config)
     httpd_config_t http = HTTPD_DEFAULT_CONFIG();
     if (config->httpd_config) http = *config->httpd_config;
     http.uri_match_fn = httpd_uri_match_wildcard;
-    size_t minimum_handlers = 16 + config->product_route_count;
+    // Handler slots must cover the builtins, the catch-all, the product_routes
+    // array AND whatever register_product_routes registers behind our back. Only
+    // the array is countable, so a callback product gets a fixed reserve.
+    //
+    // This used to be a flat "16 + product_route_count", which left exactly two
+    // spare slots for callback products. A product registering a third route
+    // silently exhausted the table, the "/*" catch-all failed to register, and
+    // the goto-fail below tore down the entire portal — the device came up with
+    // no web UI at all. Sized from the real builtin count so adding a builtin
+    // can't quietly eat a product's headroom again.
+    size_t minimum_handlers = DC_PORTAL_BUILTIN_ROUTE_COUNT
+                            + 1                                 // "/*" catch-all
+                            + config->product_route_count
+                            + (config->register_product_routes ? DC_PORTAL_CALLBACK_ROUTE_RESERVE : 0);
     if (http.max_uri_handlers < minimum_handlers)
         http.max_uri_handlers = minimum_handlers;
     // provisioning_get serializes the product descriptor AND the full Wi-Fi scan
@@ -570,6 +593,8 @@ esp_err_t dc_portal_start(const dc_portal_config_t *config)
         { .uri = "/console", .method = HTTP_GET, .handler = console_page },
         { .uri = "/", .method = HTTP_GET, .handler = spa_get },
     };
+    _Static_assert(sizeof(builtins) / sizeof(builtins[0]) == DC_PORTAL_BUILTIN_ROUTE_COUNT,
+                   "DC_PORTAL_BUILTIN_ROUTE_COUNT must match builtins[]");
     for (size_t i = 0; i < sizeof(builtins) / sizeof(builtins[0]); ++i) {
         err = register_handler(&builtins[i]);
         if (err != ESP_OK) goto fail;

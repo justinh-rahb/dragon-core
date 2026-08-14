@@ -37,6 +37,17 @@ for (const marker of [
   "function applyVent(s)",
   "ventPost('/api/v2/settings'",
   "ventCommand('manual'",
+  // DragonWheeze (Sovol SH01 filament dryer) surface.
+  'ui.product===\'dragonwheeze\'',
+  'id="dw-app"',
+  'data-dry-content="presets"',
+  'data-dry-content="manual"',
+  "function applyDry(s)",
+  "dryCommand('set_preset'",
+  "dryCommand('set_target'",
+  // The sensor fault must stay a first-class element of the dryer dashboard: it
+  // is the only signal that the ambient pair has stopped being trustworthy.
+  'id="dw-fault"',
   'id="dc-provisioning"',
   "function dcFetchJson(path,options,retried)",
   // Auth transport: exactly one token derivation, used by dcFetchJson, and
@@ -51,6 +62,15 @@ for (const marker of [
   "'/api/v1/system/update'",
 ]) {
   if (!html.includes(marker)) throw new Error(`missing family-SPA contract marker: ${marker}`);
+}
+
+// The Sovol SH01 front panel offers exactly three temperatures (40/45/50 °C), so
+// the dryer's manual target is a selection and not a range. A free-running slider
+// here would let the UI request a setpoint the hardware can never reach, and the
+// firmware would tap M/A forever trying to land on it.
+const dryTemps = [...html.matchAll(/data-dry-temp="(\d+)"/g)].map((m) => m[1]);
+if (dryTemps.join(",") !== "40,45,50") {
+  throw new Error(`DragonWheeze must offer exactly 40,45,50 °C; found: ${dryTemps.join(",") || "none"}`);
 }
 
 // Regression guard for #14: the auth transport must stay product-agnostic. It was

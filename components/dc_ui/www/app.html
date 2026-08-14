@@ -489,6 +489,111 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
   .vent-actions .btn{ min-height:38px; padding:0 5px; font-size:12px; }
   .vent-thresholds{ grid-template-columns:1fr; }
 }
+
+/* ---- DragonWheeze product surface (Sovol SH01 filament dryer). Same shell and
+   tokens as the rest of the family; a violet accent separates it at a glance from
+   DragonBreath's blue and DragonVent's teal, and stays clear of the orange
+   --destructive that the sensor-fault banner uses. Its own DOM subtree, so the
+   established DragonBreath ids and behavior stay compatibility-stable.
+
+   The SH01 cannot report its panel state back to us — M/A taps are one-way through
+   optocouplers — so this surface presents what the firmware *believes* and never
+   dresses a belief up as a measurement. ---- */
+.dry-app{
+  --primary: light-dark(rgb(124 58 237), rgb(196 181 253));
+  --ring: light-dark(rgb(124 58 237), rgb(196 181 253 / 76%));
+  --viz-series-1: var(--primary);
+  --viz-series-2: light-dark(rgb(217 70 239), rgb(240 171 252));
+  /* The family default is ~50% opacity, which reads as washed out on the 11-13px
+     labels this surface leans on (dt rows, preset sublabels, set-notes). Lifted to
+     ~70% for the dryer subtree only, so the other products keep their look. */
+  --muted-foreground: light-dark(rgb(26 28 31 / 72%), rgb(255 255 255 / 74%));
+}
+.dry-main{ min-width:0; min-height:0; overflow:hidden; padding:12px;
+  display:flex; flex-direction:column; }
+.dry-tab[data-dry-page="settings"]{ margin-top:auto; }
+.dry-view{ display:none; flex:1; min-height:0; overflow:auto; }
+.dry-main[data-dry-page="home"]     [data-dry-content="home"],
+.dry-main[data-dry-page="presets"]  [data-dry-content="presets"],
+.dry-main[data-dry-page="manual"]   [data-dry-content="manual"],
+.dry-main[data-dry-page="settings"] [data-dry-content="settings"]{ display:flex; }
+.dry-home{ flex-direction:column; gap:9px; overflow:auto; }
+.dry-grid{ min-height:0; display:grid; grid-template-columns:minmax(0,1.15fr) minmax(190px,.85fr);
+  grid-template-rows:minmax(160px,1fr) auto; gap:9px; }
+
+/* Hero: the ambient reading is the one real measurement this device has. */
+.dry-hero{ display:flex; align-items:center; gap:18px; }
+.dry-visual{ position:relative; width:min(36%,142px); min-width:100px; aspect-ratio:1;
+  display:grid; place-items:center; border-radius:50%;
+  background:radial-gradient(circle, color-mix(in srgb,var(--primary) 18%,transparent) 0 45%, transparent 46%);
+  border:1px solid color-mix(in srgb,var(--primary) 30%,var(--border)); }
+.dry-ring{ position:absolute; inset:12%; border:7px solid color-mix(in srgb,var(--foreground) 10%,transparent);
+  border-top-color:var(--primary); border-radius:50%; }
+.dry-app[data-dry-active="1"] .dry-ring{ animation:dry-spin 5.5s linear infinite; }
+@keyframes dry-spin{ to{ transform:rotate(360deg); } }
+@media(prefers-reduced-motion:reduce){ .dry-app[data-dry-active="1"] .dry-ring{ animation:none; } }
+.dry-mark{ display:grid; place-items:center; line-height:1.05; }
+.dry-mark strong{ font-size:27px; font-variant-numeric:tabular-nums; }
+.dry-mark span{ color:var(--muted-foreground); font-size:11px; text-transform:uppercase; }
+.dry-copy{ min-width:0; display:flex; flex-direction:column; gap:5px; }
+.dry-copy h2{ margin:0; font-size:26px; }
+.dry-copy p{ margin:0; color:var(--muted-foreground); font-size:13px; }
+.dry-chip{ align-self:flex-start; padding:2px 8px; border-radius:var(--radius-full);
+  background:color-mix(in srgb,var(--primary) 15%,transparent);
+  color:var(--primary); font-size:11px; font-weight:600; text-transform:uppercase; }
+
+/* Tabular numerals so the countdown doesn't jitter as digits change. */
+.dry-remain{ font-variant-numeric:tabular-nums; }
+.dry-bar{ height:5px; border-radius:var(--radius-full); background:var(--muted); overflow:hidden; margin-top:8px; }
+.dry-bar>i{ display:block; height:100%; width:0%; background:var(--primary); transition:width .4s ease; }
+
+.dry-actions{ display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:7px; }
+.dry-actions .btn{ min-height:42px; }
+.dry-presets{ display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px; }
+.dry-presets .btn{ min-height:58px; flex-direction:column; gap:1px; }
+.dry-presets .btn small{ color:var(--muted-foreground); font-size:11px; font-weight:400; }
+/* The shared pressed rule paints --primary-foreground on --primary. Overriding
+   only the background (as the subtle preset tint does) leaves that foreground
+   behind — near-black text on a dark tint. Any surface that restyles the pressed
+   background has to restate the text colour with it. */
+.dry-presets .btn[aria-pressed="true"]{ border-color:var(--primary);
+  background:color-mix(in srgb,var(--primary) 14%,transparent);
+  color:var(--foreground); }
+.dry-presets .btn[aria-pressed="true"] small{ color:color-mix(in srgb,var(--foreground) 72%,transparent); }
+/* Buttons that keep the solid --primary fill (the 40/45/50 choice) need their
+   sublabel derived from --primary-foreground; --muted-foreground is tuned for the
+   card background and disappears against the accent. */
+.dry-app .btn:not(.btn-primary)[aria-pressed="true"] small{
+  color:color-mix(in srgb,var(--primary-foreground) 76%,transparent); }
+.dry-taps{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+.dry-taps .btn{ min-height:60px; flex-direction:column; gap:1px; }
+.dry-taps .btn small{ color:var(--muted-foreground); font-size:11px; }
+
+/* Sensor-fault banner. Hidden outright when healthy: a permanent "no fault" row
+   trains people to ignore the exact space the real warning will appear in. */
+.dry-fault{ display:flex; align-items:flex-start; gap:8px; padding:9px 11px;
+  border:1px solid color-mix(in srgb,var(--destructive) 45%,var(--border));
+  background:color-mix(in srgb,var(--destructive) 12%,transparent);
+  border-radius:var(--radius-lg); color:var(--foreground); }
+.dry-fault .icon{ flex:none; color:var(--destructive); margin-top:1px; }
+.dry-fault strong{ display:block; font-size:13px; }
+/* Deliberately not --muted-foreground: this line is the remediation instruction,
+   the one piece of text on the surface someone reads under pressure. */
+.dry-fault span{ color:color-mix(in srgb,var(--foreground) 88%,transparent); font-size:12px; }
+@container (max-width:620px){
+  .dry-grid{ grid-template-columns:1fr; grid-template-rows:auto auto auto; }
+  .dry-actions{ grid-column:1; }
+  .dry-hero{ min-height:138px; }
+}
+@container (max-width:410px){
+  .dry-main{ padding:8px; }
+  .dry-grid{ gap:7px; }
+  .dry-hero{ gap:10px; padding:9px; }
+  .dry-visual{ min-width:86px; }
+  .dry-copy h2{ font-size:22px; }
+  .dry-mark strong{ font-size:23px; }
+  .dry-actions .btn{ min-height:38px; padding:0 5px; font-size:12px; }
+}
 </style>
 </head>
 <body>
@@ -513,6 +618,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
   <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M5 21h14"/></symbol>
   <symbol id="i-wifi" viewBox="0 0 24 24"><path d="M5 12.5a10 10 0 0 1 14 0"/><path d="M8.5 16a5 5 0 0 1 7 0"/><path d="M12 20h.01"/></symbol>
   <symbol id="i-vent" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 3c2.8 2.8 3.3 5.1 1.5 7.1M21 12c-2.8 2.8-5.1 3.3-7.1 1.5M12 21c-2.8-2.8-3.3-5.1-1.5-7.1M3 12c2.8-2.8 5.1-3.3 7.1-1.5"/><circle cx="12" cy="12" r="1.5"/></symbol>
+  <symbol id="i-droplet" viewBox="0 0 24 24"><path d="M12 3s6 6.3 6 10.2A6 6 0 0 1 6 13.2C6 9.3 12 3 12 3z"/></symbol>
 </svg>
 
 <div class="app" data-state="off" data-online="0">
@@ -1035,6 +1141,147 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
   </div>
 </div>
 
+<div class="app dry-app" id="dw-app" data-online="0" data-dry-active="0" hidden>
+  <div class="shell">
+    <nav class="rail" aria-label="DragonWheeze navigation">
+      <div class="connection" aria-label="Connection"><i class="dot"></i><span id="dw-conn">Connecting…</span></div>
+      <button class="tab dry-tab" type="button" data-dry-page="home" aria-selected="true" aria-label="Dashboard"><svg class="icon"><use href="#i-house"/></svg></button>
+      <button class="tab dry-tab" type="button" data-dry-page="presets" aria-selected="false" aria-label="Filament presets"><svg class="icon"><use href="#i-spool"/></svg></button>
+      <button class="tab dry-tab" type="button" data-dry-page="manual" aria-selected="false" aria-label="Manual control"><svg class="icon"><use href="#i-thermometer"/></svg></button>
+      <button class="tab dry-tab" type="button" data-dry-page="settings" aria-selected="false" aria-label="Settings"><svg class="icon"><use href="#i-settings"/></svg></button>
+    </nav>
+
+    <main class="dry-main" id="dw-main" data-dry-page="home">
+      <section class="dry-view dry-home" data-dry-content="home">
+        <!-- Sensor fault. Hidden while healthy; the ambient readings above go to
+             '--' at the same time, so a fault is never shown next to a number that
+             looks live. -->
+        <div class="dry-fault" id="dw-fault" hidden role="status" aria-live="polite">
+          <svg class="icon"><use href="#i-alert"/></svg>
+          <div><strong id="dw-fault-title">Sensor fault</strong><span id="dw-fault-detail">--</span></div>
+        </div>
+
+        <div class="dry-grid">
+          <article class="card dry-hero">
+            <div class="dry-visual" aria-hidden="true">
+              <div class="dry-ring"></div>
+              <div class="dry-mark"><strong id="dw-temp">--</strong><span>ambient</span></div>
+            </div>
+            <div class="dry-copy">
+              <h2 id="dw-headline">DragonWheeze</h2>
+              <p id="dw-summary">Connecting to the dryer…</p>
+              <span class="dry-chip" id="dw-mode-chip">-- </span>
+              <p class="dry-remain" id="dw-remaining">--</p>
+              <div class="dry-bar" aria-hidden="true"><i id="dw-progress"></i></div>
+            </div>
+          </article>
+
+          <article class="card dry-status">
+            <h3>Dryer</h3>
+            <dl class="status-detail">
+              <div><dt>Power</dt><dd id="dw-power">--</dd></div>
+              <div><dt>Cycle</dt><dd id="dw-cycle">--</dd></div>
+              <div><dt>Preset</dt><dd id="dw-preset">--</dd></div>
+              <div><dt>Target</dt><dd id="dw-target">--</dd></div>
+              <div><dt>Humidity</dt><dd id="dw-humidity">--</dd></div>
+              <div><dt>Panel button</dt><dd id="dw-button">--</dd></div>
+            </dl>
+          </article>
+
+          <div class="dry-actions" aria-label="Quick dryer actions">
+            <button class="btn btn-primary" type="button" id="dw-start"><svg class="icon"><use href="#i-play"/></svg> Start</button>
+            <button class="btn" type="button" id="dw-stop"><svg class="icon"><use href="#i-square"/></svg> Stop</button>
+            <button class="btn" type="button" id="dw-power-toggle"><svg class="icon"><use href="#i-power"/></svg> Power</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="dry-view vent-mode-page" data-dry-content="presets">
+        <div>
+          <h3>Filament presets</h3>
+          <p class="set-note">Each preset drives the panel to a target temperature and run time. Selecting one runs the reset-before-automation sequence: the dryer is cycled off and on to reach its known 40&nbsp;°C / 6&nbsp;h base state, then tapped up to the target.</p>
+        </div>
+        <div class="dry-presets">
+          <button class="btn" type="button" data-dry-preset="PLA"><strong>PLA</strong><small>45 °C · 6 h</small></button>
+          <button class="btn" type="button" data-dry-preset="PETG"><strong>PETG</strong><small>50 °C · 8 h</small></button>
+          <button class="btn" type="button" data-dry-preset="TPU"><strong>TPU</strong><small>50 °C · 10 h</small></button>
+          <button class="btn" type="button" data-dry-preset="ABS"><strong>ABS</strong><small>50 °C · 12 h</small></button>
+        </div>
+        <div class="mode-feedback" id="dw-preset-msg" role="status" aria-live="polite"></div>
+      </section>
+
+      <section class="dry-view vent-mode-page" data-dry-content="manual">
+        <div>
+          <h3>Manual target</h3>
+          <p class="set-note">The SH01 front panel offers exactly three temperatures. Duration steps in whole hours from 6 to 12.</p>
+        </div>
+        <div class="vent-choice" role="group" aria-label="Target temperature">
+          <button class="btn" type="button" data-dry-temp="40"><strong>40 °C</strong><small>Low</small></button>
+          <button class="btn" type="button" data-dry-temp="45"><strong>45 °C</strong><small>PLA</small></button>
+          <button class="btn" type="button" data-dry-temp="50"><strong>50 °C</strong><small>High</small></button>
+        </div>
+        <div class="vent-thresholds">
+          <div class="vent-threshold">
+            <label for="dw-hours-range">Run time</label>
+            <output class="touch-value" id="dw-hours-value">6 <span>h</span></output>
+            <input class="form-range" id="dw-hours-range" type="range" min="6" max="12" step="1" value="6">
+          </div>
+        </div>
+        <button class="btn btn-primary btn-block" type="button" id="dw-apply"><svg class="icon"><use href="#i-clock"/></svg> Apply target</button>
+
+        <div>
+          <h3>Panel taps</h3>
+          <p class="set-note">Send a single 200&nbsp;ms optocoupler pulse to the front-panel pads. These are one-way — the firmware cannot read the panel back, so its idea of the current state may drift. Re-sync realigns it.</p>
+        </div>
+        <div class="dry-taps">
+          <button class="btn" type="button" id="dw-press-m"><strong>M</strong><small>Mode</small></button>
+          <button class="btn" type="button" id="dw-press-a"><strong>A</strong><small>Adjust</small></button>
+        </div>
+        <button class="btn btn-block" type="button" id="dw-resync"><svg class="icon"><use href="#i-refresh"/></svg> Re-sync to base state</button>
+        <div class="mode-feedback" id="dw-manual-msg" role="status" aria-live="polite"></div>
+      </section>
+
+      <section class="dry-view vent-settings" data-dry-content="settings">
+        <article class="set-card">
+          <h3>Device</h3>
+          <dl class="set-info">
+            <div><dt>Firmware</dt><dd id="dw-version">--</dd></div>
+            <div><dt>Device ID</dt><dd id="dw-device-id">--</dd></div>
+            <div><dt>Wi-Fi</dt><dd id="dw-wifi">--</dd></div>
+            <div><dt>Sensor</dt><dd id="dw-sensor-state">--</dd></div>
+          </dl>
+        </article>
+        <article class="set-card">
+          <h3>I²C diagnostics</h3>
+          <p class="set-note">The SH01 mainboard intermittently raises an <code>E0</code> error on its own bus. These counters characterise how often the AHT20 read is disturbed.</p>
+          <dl class="set-info">
+            <div><dt>Reads</dt><dd id="dw-i2c-reads">--</dd></div>
+            <div><dt>Successful</dt><dd id="dw-i2c-ok">--</dd></div>
+            <div><dt>Bus errors</dt><dd id="dw-i2c-bus">--</dd></div>
+            <div><dt>CRC errors</dt><dd id="dw-i2c-crc">--</dd></div>
+            <div><dt>Poll interval</dt><dd id="dw-i2c-interval">--</dd></div>
+          </dl>
+        </article>
+        <article class="set-card">
+          <h3>Network</h3>
+          <p class="set-note">Wi-Fi credentials, fallback AP, firmware update, logs and factory reset remain available in the recovery-safe setup page.</p>
+          <a class="btn btn-primary btn-block" href="#setup" data-open-provisioning><svg class="icon"><use href="#i-settings"/></svg> Open device setup</a>
+        </article>
+        <article class="set-card">
+          <h3>Appearance</h3>
+          <div class="theme-seg">
+            <button class="btn btn-sm" type="button" data-theme-set="auto" aria-pressed="true">System</button>
+            <button class="btn btn-sm" type="button" data-theme-set="light" aria-pressed="false">Light</button>
+            <button class="btn btn-sm" type="button" data-theme-set="dark" aria-pressed="false">Dark</button>
+          </div>
+        </article>
+      </section>
+
+      <div class="app-version">DragonWheeze <span id="dw-footer-version">—</span></div>
+    </main>
+  </div>
+</div>
+
 <section class="provision-overlay" id="dc-provisioning" hidden aria-label="Device setup">
   <div class="provision-shell">
     <div class="provision-head"><div><strong id="dc-setup-title">Device setup</strong><div class="set-note" id="dc-setup-mode"></div></div>
@@ -1070,6 +1317,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
 (function(){
   var app = document.querySelector('.app');
   var ventApp = document.getElementById('dv-app');
+  var dryApp = document.getElementById('dw-app');
   var product = 'dragonbreath';
   var $ = function(id){ return document.getElementById(id); };
   function u(id, v){ var e=$(id); if(e) e.textContent = v; }
@@ -1275,6 +1523,18 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
       u('dv-version', i.firmware||'--');
       u('dv-footer-version', i.firmware||'—');
       u('dv-device-id', i.device_id||'--');
+      return;
+    }
+    if(ui.product==='dragonwheeze'){
+      product='dragonwheeze';
+      app.hidden=true;
+      if(ventApp) ventApp.hidden=true;
+      dryApp.hidden=false;
+      dryApp.setAttribute('data-online','0');
+      document.title=ui.display_name||'DragonWheeze';
+      u('dw-version', i.firmware||'--');
+      u('dw-footer-version', i.firmware||'—');
+      u('dw-device-id', i.device_id||'--');
       return;
     }
     var title=$('dc-product-title');
@@ -1569,7 +1829,131 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     e.textContent=msg||''; e.className='mode-feedback'+(klass?' '+klass:'');
   }
 
+  /* ---- DragonWheeze adapter. The SH01 is a subordinate: this firmware taps its
+     front panel through optocouplers and can never read the panel back, so every
+     dryer field here is the firmware's belief, not a measurement. The only measured
+     values are the AHT20 ambient pair, and those are withheld while the sensor is
+     faulted rather than shown as a stale number. ---- */
+  function drySetConn(ok){
+    if(!dryApp) return;
+    dryApp.setAttribute('data-online', ok?'1':'0');
+    u('dw-conn', ok?'Connected':'Reconnecting…');
+  }
+  function dryActivatePage(page){
+    var tab=document.querySelector('.dry-tab[data-dry-page="'+page+'"]');
+    if(!tab) return;
+    $('dw-main').dataset.dryPage=page;
+    document.querySelectorAll('.dry-tab').forEach(function(t){
+      t.setAttribute('aria-selected', String(t===tab));
+    });
+  }
+  function dryDuration(sec){
+    if(sec==null) return '--';
+    sec=Math.max(0,Math.round(sec));
+    var h=Math.floor(sec/3600), m=Math.floor((sec%3600)/60);
+    return h>0 ? h+' h '+String(m).padStart(2,'0')+' m' : m+' m';
+  }
+  /* Each fault names the physical thing to go check; "fault: true" alone sends
+     people to the logs to work out what it means. */
+  var DRY_FAULT_TEXT={
+    SENSOR_ABSENT:'No reply from the AHT20 over I²C. Check the 4-pin connector and the SDA/SCL pull-ups — readings resume on their own once it answers.',
+    I2C_BUS_ERROR:'The I²C bus stopped responding mid-read. Often the SH01 mainboard’s intermittent E0 contention; the firmware rebuilds the bus and retries.',
+    CRC_ERROR:'The sensor replies but its data keeps failing CRC. Usually wiring noise — check the 100 kΩ joint resistors and cable routing.'
+  };
+  function applyDry(s){
+    if(!s || s.api_version!==2 || !s.dryer) return;
+    if(product!=='dragonwheeze'){
+      applyDeviceInfo({firmware:s.firmware, device_id:s.device_id,
+        ui:{schema:1,product:'dragonwheeze',display_name:'DragonWheeze'}});
+    }
+    var d=s.dryer||{}, n=s.sensor||{}, w=s.wifi||{};
+    var active=!!d.active, power=!!d.power;
+    dryApp.dataset.dryActive=active?'1':'0';
+
+    /* Ambient pair: the sensor's own fault flag decides whether a number is
+       trustworthy, so a faulted sensor reads '--' instead of its last value. */
+    var faulted=!!n.faulted;
+    u('dw-temp', faulted||n.temperature_c==null ? '--' : Number(n.temperature_c).toFixed(1));
+    u('dw-humidity', faulted||n.humidity_rh==null ? '--' : Number(n.humidity_rh).toFixed(1)+' %RH');
+
+    var fault=$('dw-fault');
+    if(fault){
+      fault.hidden=!faulted;
+      if(faulted){
+        u('dw-fault-title', 'Ambient sensor fault — '+(n.fault||'UNKNOWN'));
+        u('dw-fault-detail', DRY_FAULT_TEXT[n.fault]||'The ambient sensor is not reporting. Drying itself is unaffected: the SH01 runs its own closed-loop thermistor safety.');
+      }
+    }
+
+    u('dw-headline', active?'Drying':(power?'Powered on':'Idle'));
+    u('dw-summary', active
+      ? 'Running the '+(d.preset||'custom')+' profile. The SH01 regulates the heater itself; this controller owns the timer.'
+      : power ? 'Dryer is powered on and holding at the panel setting. Start a cycle to run the timer.'
+              : 'Dryer is off. Starting a cycle powers it on and taps in the target.');
+    u('dw-mode-chip', (active?'drying':power?'standby':'off'));
+    u('dw-remaining', active ? dryDuration(d.remaining_seconds)+' remaining' : '--');
+
+    var bar=$('dw-progress');
+    if(bar){
+      var total=(d.elapsed_seconds||0)+(d.remaining_seconds||0);
+      bar.style.width=(active&&total>0)?(Math.min(100,(d.elapsed_seconds/total)*100)+'%'):'0%';
+    }
+
+    u('dw-power', power?'on':'off');
+    u('dw-cycle', active?'running':'stopped');
+    u('dw-preset', d.preset_label||d.preset||'--');
+    u('dw-target', d.target_c==null?'--':Math.round(d.target_c)+' °C · '+(d.target_hours==null?'--':d.target_hours+' h'));
+    u('dw-button', d.panel_button?'pressed':'released');
+
+    u('dw-version', s.firmware||'--');
+    u('dw-footer-version', s.firmware||'—');
+    u('dw-wifi', (w.state||'unknown')+(w.ip?' · '+w.ip:'')+(w.rssi!=null?' · '+w.rssi+' dBm':''));
+    u('dw-sensor-state', n.fault||'--');
+    u('dw-i2c-reads', n.reads==null?'--':String(n.reads));
+    u('dw-i2c-ok', n.successful==null?'--':String(n.successful));
+    u('dw-i2c-bus', n.bus_errors==null?'--':String(n.bus_errors));
+    u('dw-i2c-crc', n.crc_errors==null?'--':String(n.crc_errors));
+    u('dw-i2c-interval', n.interval_s==null?'--':n.interval_s+' s');
+
+    document.querySelectorAll('[data-dry-preset]').forEach(function(b){
+      b.setAttribute('aria-pressed', String(b.dataset.dryPreset===d.preset));
+    });
+    document.querySelectorAll('[data-dry-temp]').forEach(function(b){
+      b.setAttribute('aria-pressed', String(Number(b.dataset.dryTemp)===Number(d.target_c)));
+    });
+    var startBtn=$('dw-start'); if(startBtn) startBtn.disabled=active;
+    var stopBtn=$('dw-stop');  if(stopBtn)  stopBtn.disabled=!active;
+    drySetConn(true);
+  }
+  function dryPost(path, body){
+    return fetch(path,{method:'POST',headers:dcAuthHeaders({'Content-Type':'application/json'}),body:JSON.stringify(body)}).then(function(r){
+      return r.json().catch(function(){return {};}).then(function(j){
+        if(j.state) applyDry(j.state);
+        if(!r.ok) throw j;
+        return j;
+      });
+    });
+  }
+  function dryCommand(name, fields){
+    var command={name:name};
+    Object.keys(fields||{}).forEach(function(k){ command[k]=fields[k]; });
+    return dryPost('/api/v2/command',{api_version:2,command:command});
+  }
+  function dryFlash(id,msg,klass){
+    var e=$(id); if(!e) return;
+    e.textContent=msg||''; e.className='mode-feedback'+(klass?' '+klass:'');
+  }
+
+  /* One place that knows which surface owns the connection indicator, so adding a
+     product does not mean hunting down every transport failure path. */
+  function productSetConn(ok){
+    if(product==='dragonvent') return ventSetConn(ok);
+    if(product==='dragonwheeze') return drySetConn(ok);
+    return setConn(ok);
+  }
+
   function apply(s){
+    if(s && s.dryer){ applyDry(s); return; }
     if(s && s.vent){ applyVent(s); return; }
     if(!s || s.api_version!==2) return;
     if(last && s.boot_id===last.boot_id && s.state_revision<rev) return;
@@ -1728,7 +2112,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     fetch('/api/v2/state', {cache:'no-store'})
       .then(function(r){ if(!r.ok) throw 0; return r.json(); })
       .then(function(s){ apply(s); pollDelay=2000; })
-      .catch(function(){ product==='dragonvent'?ventSetConn(false):setConn(false); pollDelay=Math.min(10000, Math.round(pollDelay*1.6)); })
+      .catch(function(){ productSetConn(false); pollDelay=Math.min(10000, Math.round(pollDelay*1.6)); })
       .finally(function(){ polling=false; setTimeout(poll, pollDelay+Math.random()*250); });
   }
   function events(){
@@ -1736,7 +2120,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     function ev(e){ seen=true; try{ apply(JSON.parse(e.data)); }catch(_){} }
     es.addEventListener('state', ev);
     es.addEventListener('telemetry', ev);
-    es.onerror=function(){ es.close(); product==='dragonvent'?ventSetConn(false):setConn(false); if(!seen) poll(); else setTimeout(poll,1000); };
+    es.onerror=function(){ es.close(); productSetConn(false); if(!seen) poll(); else setTimeout(poll,1000); };
   }
 
   /* ---- Navigation: rail tabs. Home = live Dashboard; manual/auto/dry = U2 control
@@ -2192,6 +2576,61 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
       .then(function(){ ventFlash('dv-auto-msg','Automatic printer-following enabled.','is-ok'); })
       .catch(function(j){ ventFlash('dv-auto-msg',(j&&j.message)||'Could not save policy.','is-error'); });
   });
+
+  /* DragonWheeze navigation and commands. Inert while another product subtree is
+     active. Every control here ends in an optocoupler pulse on the SH01's front
+     panel, so each one reports back rather than silently assuming it landed. */
+  document.querySelectorAll('.dry-tab').forEach(function(tab){
+    tab.addEventListener('click',function(){ dryActivatePage(tab.dataset.dryPage); });
+  });
+  document.querySelectorAll('[data-dry-preset]').forEach(function(b){
+    b.addEventListener('click',function(){
+      var name=b.dataset.dryPreset;
+      dryFlash('dw-preset-msg','Applying '+name+' — cycling the dryer to its base state first…');
+      dryCommand('set_preset',{preset:name})
+        .then(function(){ dryFlash('dw-preset-msg',name+' applied.','is-ok'); })
+        .catch(function(j){ dryFlash('dw-preset-msg',(j&&j.message)||'Could not apply preset.','is-error'); });
+    });
+  });
+  /* The panel exposes exactly three temperatures, so this is a selection, not a
+     range: clicking one stages it and the range input supplies the duration. */
+  var dryTemp=null;
+  document.querySelectorAll('[data-dry-temp]').forEach(function(b){
+    b.addEventListener('click',function(){
+      dryTemp=Number(b.dataset.dryTemp);
+      document.querySelectorAll('[data-dry-temp]').forEach(function(o){
+        o.setAttribute('aria-pressed', String(o===b));
+      });
+    });
+  });
+  if($('dw-hours-range')){
+    $('dw-hours-range').addEventListener('input',function(){ u('dw-hours-value', this.value+' h'); });
+  }
+  if($('dw-apply')) $('dw-apply').addEventListener('click',function(){
+    if(dryTemp==null){ dryFlash('dw-manual-msg','Pick a target temperature first.','is-error'); return; }
+    var hours=Number($('dw-hours-range').value);
+    dryFlash('dw-manual-msg','Tapping in '+dryTemp+' °C for '+hours+' h…');
+    dryCommand('set_target',{target_c:dryTemp,target_hours:hours})
+      .then(function(){ dryFlash('dw-manual-msg','Target applied.','is-ok'); })
+      .catch(function(j){ dryFlash('dw-manual-msg',(j&&j.message)||'Could not apply target.','is-error'); });
+  });
+  function dryTap(name,label){
+    dryFlash('dw-manual-msg','Pulsing '+label+'…');
+    dryCommand(name,{})
+      .then(function(){ dryFlash('dw-manual-msg',label+' tapped.','is-ok'); })
+      .catch(function(j){ dryFlash('dw-manual-msg',(j&&j.message)||'Tap failed.','is-error'); });
+  }
+  if($('dw-press-m')) $('dw-press-m').addEventListener('click',function(){ dryTap('press_m','M'); });
+  if($('dw-press-a')) $('dw-press-a').addEventListener('click',function(){ dryTap('press_a','A'); });
+  if($('dw-resync')) $('dw-resync').addEventListener('click',function(){
+    dryFlash('dw-manual-msg','Re-syncing: powering off, back on, then tapping to target…');
+    dryCommand('resync',{})
+      .then(function(){ dryFlash('dw-manual-msg','Re-synced to the panel base state.','is-ok'); })
+      .catch(function(j){ dryFlash('dw-manual-msg',(j&&j.message)||'Re-sync failed.','is-error'); });
+  });
+  if($('dw-start')) $('dw-start').addEventListener('click',function(){ dryCommand('start',{}).catch(function(){}); });
+  if($('dw-stop')) $('dw-stop').addEventListener('click',function(){ dryCommand('stop',{}).catch(function(){}); });
+  if($('dw-power-toggle')) $('dw-power-toggle').addEventListener('click',function(){ dryCommand('power_toggle',{}).catch(function(){}); });
 
   /* Device info -> the Maintenance panel. (The old header brand/tooltip was
      removed; the firmware version is shown in the footer, populated in apply().) */
