@@ -34,8 +34,9 @@ typedef struct {
     char  filament[16];   // active filament type from AMS / ext spool (e.g. "PETG");
                           // "" if unknown. Feeds filament-based chamber zones.
     bool  printing;       // gcode_state is PREPARE/RUNNING/PAUSE (a print is active);
-                          // gates when a filament zone is applied.
+    // gates when a filament zone is applied.
     bool  error;          // gcode_state is FAILED (print failed / errored)
+    float progress;       // mc_percent / 100, or -1 until the printer reports it
 } dc_bambu_status_t;
 
 esp_err_t dc_bambu_start(void);
