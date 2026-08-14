@@ -976,25 +976,6 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
           <p class="set-note">Auto follows your device's light/dark setting. Your choice is remembered on this browser only.</p>
         </div>
 
-        <!-- Network / printer + control token. -->
-        <div class="set-card">
-          <h3>Network &amp; printer</h3>
-          <p class="set-note">Wi-Fi network and Moonraker host/port are configured together on the setup page — changing Wi-Fi re-enters the password, so they are kept on one screen to avoid dropping the device off the network.</p>
-          <div class="settings-links">
-            <a class="btn" href="#setup" data-open-provisioning><svg class="icon"><use href="#i-wifi"/></svg> Wi-Fi &amp; printer setup</a>
-          </div>
-          <div class="ctl-group" style="margin-top:4px">
-            <div class="ctl-head"><span class="form-label">Control token</span></div>
-            <input class="form-input" id="s-token" type="text" maxlength="64" placeholder="Enter a token, or leave blank" autocomplete="off" spellcheck="false">
-            <p class="set-note is-warn">A control token locks every command to clients that send it. If you set one, this browser remembers it — but Klipper/Moonraker and any other device must be given the same token or they can no longer control the heater. Clear it to return to open LAN control.</p>
-            <div class="set-row">
-              <button class="btn btn-primary" type="button" id="s-token-save"><span>Set token</span></button>
-              <button class="btn btn-danger" type="button" id="s-token-clear"><span>Clear token</span></button>
-            </div>
-            <div class="mode-feedback" id="s-token-msg" role="status" aria-live="polite"></div>
-          </div>
-        </div>
-
         <!-- Event log (GET /api/v2/logs). -->
         <div class="set-card">
           <h3 class="set-head-row"><span>Event log</span>
@@ -1270,6 +1251,12 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
       <div class="provision-actions"><button class="btn btn-primary" type="button" id="dc-ap-save">Save AP &amp; reboot</button></div><div class="provision-msg" id="dc-ap-msg"></div>
     </article>
     <div id="dc-product-setup"></div>
+    <article class="provision-card" id="dc-token-card" hidden><h3>Control token</h3>
+      <p class="set-note is-warn">A control token locks every command to clients that send it. If you set one, this browser remembers it — but Klipper/Moonraker and any other device must be given the same token or they can no longer control the heater. Clear it to return to open LAN control.</p>
+      <div class="provision-field"><label for="s-token">Token</label><input class="form-input" id="s-token" type="text" maxlength="64" placeholder="Enter a token, or leave blank" autocomplete="off" spellcheck="false"></div>
+      <div class="provision-actions"><button class="btn btn-primary" type="button" id="s-token-save"><span>Set token</span></button><button class="btn btn-danger" type="button" id="s-token-clear"><span>Clear token</span></button></div>
+      <div class="mode-feedback" id="s-token-msg" role="status" aria-live="polite"></div>
+    </article>
     <article class="provision-card" id="dc-maintenance"><h3>Firmware &amp; maintenance</h3>
       <div id="dc-update-notice" class="set-note" style="display:none"></div>
       <div class="provision-actions"><input id="dc-ota-file" type="file" accept=".bin"><button class="btn" type="button" id="dc-ota-upload">Upload firmware</button><button class="btn" type="button" id="dc-load-logs">Refresh logs</button><button class="btn" type="button" id="dc-factory-reset">Factory reset</button></div>
@@ -1453,6 +1440,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     (d.networks||[]).forEach(function(n){var o=document.createElement('option');o.value=n.ssid;o.textContent=n.ssid+' · '+n.rssi+' dBm'+(n.secured?' · secured':'');select.appendChild(o);});
     var ap=d.fallback_ap||{};$('dc-ap-ssid').value=ap.ssid||'';$('dc-ap-password').value='';$('dc-ap-ip').value=ap.ip||'';$('dc-ap-enabled').value=ap.enabled===false?'0':'1';
     renderProductSetup(d.product_setup);
+    var tokCard=$('dc-token-card'); if(tokCard) tokCard.hidden=(product!=='dragonbreath');
     addPwToggles();
     if(d.last_failure)setupMessage('dc-wifi-msg','Could not join '+d.last_failure.ssid+': '+d.last_failure.reason,true);
   }
