@@ -36,6 +36,14 @@ static void expect_active(const char *state, int want)
     printf("[%s] gcode %-9s want=%d got=%d\n", ok ? "PASS" : "FAIL", state, want, got);
 }
 
+static void expect_phase(const char *state, dc_bambu_gcode_phase_t want)
+{
+    dc_bambu_gcode_phase_t got = dc_bambu_gcode_phase(state);
+    int ok = got == want;
+    if (!ok) fails++;
+    printf("[%s] phase %-9s want=%d got=%d\n", ok ? "PASS" : "FAIL", state, want, got);
+}
+
 int main(void)
 {
     // --- active-filament tri-state ---
@@ -117,6 +125,17 @@ int main(void)
     expect_active("FINISH",  0);
     expect_active("FAILED",  0);
     expect_active("",        0);
+
+    // --- normalized gcode phases, including the H2D download indication ---
+    expect_phase("SLICING",     DC_BAMBU_GCODE_DOWNLOADING);
+    expect_phase("DOWNLOAD",    DC_BAMBU_GCODE_DOWNLOADING);
+    expect_phase("PREPARE",     DC_BAMBU_GCODE_PREPARING);
+    expect_phase("RUNNING",     DC_BAMBU_GCODE_PRINTING);
+    expect_phase("PAUSE",       DC_BAMBU_GCODE_PAUSED);
+    expect_phase("FINISH",      DC_BAMBU_GCODE_COMPLETE);
+    expect_phase("FAILED",      DC_BAMBU_GCODE_ERROR);
+    expect_phase("IDLE",        DC_BAMBU_GCODE_IDLE);
+    expect_phase("UNRECOGNIZED", DC_BAMBU_GCODE_UNKNOWN);
 
     printf(fails ? "\n%d FAILED\n" : "\nALL PASS\n", fails);
     return fails ? 1 : 0;
