@@ -156,13 +156,16 @@ static void parse_report(const char *json)
     if (got_gs) {
         s_status.printing = dc_bambu_gcode_active(gs);   // keep prior if a delta omits it
         s_status.error    = (strcmp(gs, "FAILED") == 0); // Bambu's print-failed state
-        if (strcmp(gs, "PREPARE") == 0) s_status.print_state = DC_BAMBU_PRINT_PREPARING;
-        else if (strcmp(gs, "RUNNING") == 0) s_status.print_state = DC_BAMBU_PRINT_PRINTING;
-        else if (strcmp(gs, "PAUSE") == 0) s_status.print_state = DC_BAMBU_PRINT_PAUSED;
-        else if (strcmp(gs, "FINISH") == 0) s_status.print_state = DC_BAMBU_PRINT_COMPLETE;
-        else if (strcmp(gs, "FAILED") == 0) s_status.print_state = DC_BAMBU_PRINT_ERROR;
-        else if (strcmp(gs, "IDLE") == 0) s_status.print_state = DC_BAMBU_PRINT_IDLE;
-        else s_status.print_state = DC_BAMBU_PRINT_UNKNOWN;
+        switch (dc_bambu_gcode_phase(gs)) {
+        case DC_BAMBU_GCODE_IDLE:        s_status.print_state = DC_BAMBU_PRINT_IDLE; break;
+        case DC_BAMBU_GCODE_DOWNLOADING: s_status.print_state = DC_BAMBU_PRINT_DOWNLOADING; break;
+        case DC_BAMBU_GCODE_PREPARING:   s_status.print_state = DC_BAMBU_PRINT_PREPARING; break;
+        case DC_BAMBU_GCODE_PRINTING:    s_status.print_state = DC_BAMBU_PRINT_PRINTING; break;
+        case DC_BAMBU_GCODE_PAUSED:      s_status.print_state = DC_BAMBU_PRINT_PAUSED; break;
+        case DC_BAMBU_GCODE_COMPLETE:    s_status.print_state = DC_BAMBU_PRINT_COMPLETE; break;
+        case DC_BAMBU_GCODE_ERROR:       s_status.print_state = DC_BAMBU_PRINT_ERROR; break;
+        default:                          s_status.print_state = DC_BAMBU_PRINT_UNKNOWN; break;
+        }
     }
     // Tri-state: PRESENT updates the filament; EMPTY (unload / print end / no spool)
     // CLEARS it so a stale zone is never applied; ABSENT (a delta that simply omits

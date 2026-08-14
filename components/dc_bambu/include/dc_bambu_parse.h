@@ -18,6 +18,35 @@ typedef enum {
     DC_FILA_PRESENT,      // an active filament type was found -> use `out`
 } dc_fila_result_t;
 
+/* Normalized form of the raw Bambu `gcode_state` token.  Keep it independent
+ * of ESP-IDF/public API types so this parser stays host-testable. */
+typedef enum {
+    DC_BAMBU_GCODE_UNKNOWN,
+    DC_BAMBU_GCODE_IDLE,
+    DC_BAMBU_GCODE_DOWNLOADING,
+    DC_BAMBU_GCODE_PREPARING,
+    DC_BAMBU_GCODE_PRINTING,
+    DC_BAMBU_GCODE_PAUSED,
+    DC_BAMBU_GCODE_COMPLETE,
+    DC_BAMBU_GCODE_ERROR,
+} dc_bambu_gcode_phase_t;
+
+static inline dc_bambu_gcode_phase_t dc_bambu_gcode_phase(const char *state)
+{
+    if (!state || !state[0]) return DC_BAMBU_GCODE_UNKNOWN;
+    if (strcmp(state, "IDLE") == 0) return DC_BAMBU_GCODE_IDLE;
+    /* SLICING is Bambu's pre-print transfer/download phase.  The latter two
+     * spellings make the normalizer tolerant of firmware-family variants. */
+    if (strcmp(state, "SLICING") == 0 || strcmp(state, "DOWNLOAD") == 0 ||
+        strcmp(state, "DOWNLOADING") == 0) return DC_BAMBU_GCODE_DOWNLOADING;
+    if (strcmp(state, "PREPARE") == 0) return DC_BAMBU_GCODE_PREPARING;
+    if (strcmp(state, "RUNNING") == 0) return DC_BAMBU_GCODE_PRINTING;
+    if (strcmp(state, "PAUSE") == 0) return DC_BAMBU_GCODE_PAUSED;
+    if (strcmp(state, "FINISH") == 0) return DC_BAMBU_GCODE_COMPLETE;
+    if (strcmp(state, "FAILED") == 0) return DC_BAMBU_GCODE_ERROR;
+    return DC_BAMBU_GCODE_UNKNOWN;
+}
+
 // Copy the string value of a JSON key ("key":"value") into out. `key` includes the
 // quotes. Returns true if a (possibly empty) string value was found.
 static inline bool dc_bambu_find_string(const char *s, const char *key, char *out, size_t outsz)
@@ -108,7 +137,8 @@ static inline int dc_bambu_zone_match(const char *filament, const char *const na
 static inline bool dc_bambu_gcode_active(const char *state)
 {
     if (!state || !state[0]) return false;
-    return strcmp(state, "RUNNING") == 0
-        || strcmp(state, "PREPARE") == 0
-        || strcmp(state, "PAUSE")   == 0;
+    dc_bambu_gcode_phase_t phase = dc_bambu_gcode_phase(state);
+    return phase == DC_BAMBU_GCODE_PRINTING
+        || phase == DC_BAMBU_GCODE_PREPARING
+        || phase == DC_BAMBU_GCODE_PAUSED;
 }
