@@ -61,7 +61,7 @@ static const char PUSHALL[] =
 static SemaphoreHandle_t        s_lock  = NULL;
 static dc_bambu_config_t        s_cfg   = {0};
 static dc_bambu_status_t        s_status = {
-    .state = DC_BAMBU_DISABLED, .bed_temp = NAN, .bed_target = NAN, .chamber_temp = NAN,
+    .state = DC_BAMBU_DISABLED, .bed_temp = NAN, .bed_target = NAN, .chamber_temp = NAN, .progress = -1,
 };
 static esp_mqtt_client_handle_t s_client = NULL;
 
@@ -128,13 +128,14 @@ static bool find_float(const char *s, const char *key, float *out)
 
 static void parse_report(const char *json)
 {
-    float bed, bedtgt, cham;
+    float bed, bedtgt, cham, percent;
     bool got_bed  = find_float(json, "\"bed_temper\"", &bed);
     // bed_target_temper is the commanded setpoint AUTO triggers on. Match the
     // "_target_temper" so it can't be confused with "bed_temper" (strstr finds the
     // first hit; searching the more specific key avoids the prefix collision).
     bool got_tgt  = find_float(json, "bed_target_temper", &bedtgt);
     bool got_cham = find_float(json, "\"chamber_temper\"", &cham);
+    bool got_percent = find_float(json, "\"mc_percent\"", &percent);
     // NOTE(phase 2b): H2/newer moved chamber temp to a packed device.ctc.info.temp
     // field; only the legacy flat chamber_temper is read here. Bed follow (the
     // goal) works on all models via bed_temper/bed_target_temper.
@@ -151,6 +152,7 @@ static void parse_report(const char *json)
     }
     if (got_tgt)  s_status.bed_target = bedtgt;
     if (got_cham) s_status.chamber_temp = cham;
+    if (got_percent) s_status.progress = percent < 0 ? 0 : percent > 100 ? 1 : percent / 100.0f;
     if (got_gs) {
         s_status.printing = dc_bambu_gcode_active(gs);   // keep prior if a delta omits it
         s_status.error    = (strcmp(gs, "FAILED") == 0); // Bambu's print-failed state
