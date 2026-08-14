@@ -49,6 +49,15 @@ The DragonStatus surface uses the family’s ember-orange accent (`#F97316`) and
 renders its printer, Wi-Fi, and lighting readiness state from `/api/v2/state`.
 Product firmware owns those state values; the SPA owns their presentation.
 
+Its lighting screen edits `/api/v2/lighting` with the same two-knob shape as
+DragonVent: `mode` chooses where the colour comes from (per-printer-state palette
+or one fixed colour) and `effect` chooses the animation, where `0` means the
+product's own per-state policy. Alongside those it round-trips a colour per
+printer state (`unbound`, `idle`, `downloading`, `preparing`, `printing`,
+`paused`, `complete`, `error`), `brightness`, `speed`, `reverse`, and the
+`complete_hold_min` / `standby_min` policy timers. Every field is optional on
+POST, so firmware may implement a subset.
+
 That surface uses the same responsive shell and appearance controls as
 DragonBreath, but has vent-specific state, manual open/close controls, and the
 automatic bed-temperature policy. It does not reinterpret vent motion as heater
