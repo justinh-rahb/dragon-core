@@ -1,4 +1,4 @@
-version: "0.18.0"
+version: "0.19.0"
 description: In-memory event and diagnostic console rings for Dragon firmware
 license: MIT
 dependencies:

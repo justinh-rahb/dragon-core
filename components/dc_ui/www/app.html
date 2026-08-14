@@ -532,7 +532,14 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
 .status-copy p{ margin:0; color:var(--muted-foreground); }
 .status-chip{ display:inline-flex; align-items:center; gap:6px; margin-top:12px; padding:4px 8px; border-radius:var(--radius-full); color:var(--primary); background:color-mix(in srgb,var(--primary) 12%,transparent); font-size:11px; font-weight:600; }
 .status-chip::before{ content:""; width:7px; height:7px; border-radius:50%; background:currentColor; }
-.status-grid{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+/* Same home composition as DragonVent: hero beside its detail panel, with any
+   full-width row spanning underneath. */
+.status-grid{ min-height:0; display:grid; grid-template-columns:minmax(0,1.15fr) minmax(190px,.85fr);
+  grid-template-rows:minmax(180px,1fr) auto; gap:10px; }
+.status-panel{ display:flex; flex-direction:column; gap:8px; }
+.status-panel h3{ margin-top:0; }
+.status-panel .status-detail{ margin-top:0; }
+.status-wide{ grid-column:1/-1; }
 .status-card h3{ margin-top:0; }
 .status-card .set-note{ margin-bottom:0; }
 @container (max-width:520px){ .status-hero,.status-grid{ grid-template-columns:1fr; } .status-orb{ width:112px; } }
@@ -1189,23 +1196,52 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
       <a class="tab status-tab" data-status-page="settings" href="#setup" data-open-provisioning aria-label="Device setup"><svg class="icon"><use href="#i-settings"/></svg></a>
     </nav>
     <main class="status-main" id="ds-main" data-status-page="home"><section class="status-view status-home" data-status-content="home">
-      <article class="card status-hero">
-        <div class="status-orb" aria-hidden="true"><div><strong id="ds-state">--</strong><span>printer</span></div></div>
-        <div class="status-copy"><h2>DragonStatus</h2><p id="ds-summary">Connecting to printer status…</p><span class="status-chip" id="ds-light-state">Status lighting</span></div>
-      </article>
       <div class="status-grid">
-        <article class="card status-card"><h3>Printer</h3><dl class="status-detail">
-          <div><dt>Source</dt><dd id="ds-source">--</dd></div>
-          <div><dt>State</dt><dd id="ds-printer-state">--</dd></div>
-        </dl></article>
-        <article class="card status-card"><h3>Device</h3><dl class="status-detail">
-          <div><dt>Wi-Fi</dt><dd id="ds-wifi">--</dd></div>
-          <div><dt>Firmware</dt><dd id="ds-version">--</dd></div>
-        </dl></article>
-      </div>
-      <article class="card status-card"><h3>Lighting</h3><p class="set-note" id="ds-light-detail">Factory status effects follow the connected printer.</p></article>
-      <a class="btn btn-primary btn-block" href="#setup" data-open-provisioning><svg class="icon"><use href="#i-settings"/></svg> Open device setup</a></section>
-      <section class="status-view status-lighting" data-status-content="lighting"><article class="set-card"><h3>Status lighting</h3><p class="set-note">Factory H2D follows the printer with your idle, printing, and error colours. An override applies one effect to every state; Music meter reacts to the built-in microphone.</p><div class="light-row"><label for="ds-light-enabled">Lighting on</label><input type="checkbox" id="ds-light-enabled"></div><div class="light-row"><label for="ds-light-bright">Brightness</label><input type="range" id="ds-light-bright" min="0" max="255"></div><div class="light-row"><label for="ds-light-idle">Idle / paused</label><input type="color" id="ds-light-idle"></div><div class="light-row"><label for="ds-light-printing">Printing</label><input type="color" id="ds-light-printing"></div><div class="light-row"><label for="ds-light-error">Error</label><input type="color" id="ds-light-error"></div><div class="light-row"><label for="ds-light-effect">Effect</label><select id="ds-light-effect"><option value="0">Factory H2D</option><option value="1">Solid override</option><option value="2">Breathe override</option><option value="3">Rainbow override</option><option value="4">Blink override</option><option value="5">Flow override</option><option value="6">Cylon eye (red)</option><option value="7">Music meter</option><option value="8">Cycle override</option><option value="9">Wave override</option><option value="10">Marquee override</option></select></div><div class="light-row"><label for="ds-light-speed">Effect speed</label><input type="range" id="ds-light-speed" min="0" max="255"></div><button class="btn btn-primary btn-block" type="button" id="ds-light-save">Save lighting</button><div class="mode-feedback" id="ds-light-msg"></div></article></section>
+        <article class="card status-hero">
+          <div class="status-orb" aria-hidden="true"><div><strong id="ds-state">--</strong><span>printer</span></div></div>
+          <div class="status-copy"><h2>DragonStatus</h2><p id="ds-summary">Connecting to printer status…</p><span class="status-chip" id="ds-light-state">Status lighting</span></div>
+        </article>
+        <article class="card status-panel">
+          <h3>Printer &amp; device</h3>
+          <dl class="status-detail">
+            <div><dt>Source</dt><dd id="ds-source">--</dd></div>
+            <div><dt>State</dt><dd id="ds-printer-state">--</dd></div>
+            <div><dt>Wi-Fi</dt><dd id="ds-wifi">--</dd></div>
+            <div><dt>Firmware</dt><dd id="ds-version">--</dd></div>
+          </dl>
+        </article>
+        <article class="card status-card status-wide"><h3>Lighting</h3><p class="set-note" id="ds-light-detail">Status effects follow the connected printer.</p></article>
+        <!-- Setup lives in the rail like every other product; this only appears
+             while no printer source has been chosen yet. -->
+        <a class="btn btn-primary btn-block status-wide" id="ds-setup-cta" href="#setup" data-open-provisioning hidden><svg class="icon"><use href="#i-settings"/></svg> Choose a printer</a>
+      </div></section>
+      <section class="status-view status-lighting" data-status-content="lighting">
+        <article class="set-card">
+          <h3>Status lighting</h3>
+          <p class="set-note">Strip-LED colour. Default: the factory H2D policy, which follows the printer through the palette below. <em>Colour follows</em> can hold one fixed colour instead, and an effect other than Factory applies a single animation to every state.</p>
+          <div class="light-row"><label for="ds-light-enabled">Lighting on</label><input type="checkbox" id="ds-light-enabled"></div>
+          <div class="light-row"><label for="ds-light-bright">Brightness</label><input type="range" id="ds-light-bright" min="0" max="255"></div>
+          <div class="light-row"><label for="ds-light-mode">Colour follows</label><select id="ds-light-mode"><option value="0">Printer state</option><option value="1">Fixed colour</option></select></div>
+          <div class="light-row"><label for="ds-light-fixed">Fixed colour</label><input type="color" id="ds-light-fixed"></div>
+          <div class="light-row"><label for="ds-light-effect">Effect</label><select id="ds-light-effect"><option value="0">Factory H2D</option><option value="1">Solid</option><option value="2">Breathe</option><option value="3">Rainbow</option><option value="4">Blink</option><option value="5">Flow</option><option value="6">Cylon eye</option><option value="7">Music meter</option><option value="8">Cycle</option><option value="9">Wave</option><option value="10">Marquee</option></select></div>
+          <div class="light-row"><label for="ds-light-speed">Effect speed</label><input type="range" id="ds-light-speed" min="0" max="255"></div>
+          <div class="light-row"><label for="ds-light-reverse">Reverse LED direction</label><input type="checkbox" id="ds-light-reverse"></div>
+          <p class="set-note">Printer-state colours (used when <em>Colour follows</em> is <em>Printer state</em>). Error keeps its colour in either mode so a fault stays recognisable.</p>
+          <div class="light-row"><label for="ds-light-unbound">Not bound / unknown</label><input type="color" id="ds-light-unbound"></div>
+          <div class="light-row"><label for="ds-light-idle">Idle</label><input type="color" id="ds-light-idle"></div>
+          <div class="light-row"><label for="ds-light-downloading">Downloading</label><input type="color" id="ds-light-downloading"></div>
+          <div class="light-row"><label for="ds-light-preparing">Preparing</label><input type="color" id="ds-light-preparing"></div>
+          <div class="light-row"><label for="ds-light-printing">Printing</label><input type="color" id="ds-light-printing"></div>
+          <div class="light-row"><label for="ds-light-paused">Paused</label><input type="color" id="ds-light-paused"></div>
+          <div class="light-row"><label for="ds-light-complete">Completed</label><input type="color" id="ds-light-complete"></div>
+          <div class="light-row"><label for="ds-light-error">Error</label><input type="color" id="ds-light-error"></div>
+          <p class="set-note">Factory timers. Completion holds the Completed colour before returning to Idle; standby blanks the bar after a long idle, except in Music meter. Zero disables either one.</p>
+          <div class="light-row"><label for="ds-light-hold">Completion hold (min)</label><span class="light-range"><input type="number" id="ds-light-hold" min="0" max="255" step="1"></span></div>
+          <div class="light-row"><label for="ds-light-standby">Idle standby (min)</label><span class="light-range"><input type="number" id="ds-light-standby" min="0" max="255" step="1"></span></div>
+          <button class="btn btn-primary btn-block" type="button" id="ds-light-save"><svg class="icon"><use href="#i-bulb"/></svg> Save lighting</button>
+          <div class="mode-feedback" id="ds-light-msg" role="status" aria-live="polite"></div>
+        </article>
+      </section>
       <div class="app-version">DragonStatus <span id="ds-footer-version">—</span></div>
     </main>
   </div>
@@ -1750,9 +1786,38 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     u('ds-conn', ok?'Connected':'Reconnecting…');
   }
   function statusRgbToHex(rgb){return rgbToHex(rgb||[255,255,255]);}
-  function statusPage(page){$('ds-main').dataset.statusPage=page;document.querySelectorAll('.status-tab').forEach(function(t){t.setAttribute('aria-selected',String(t.dataset.statusPage===page));});if(page==='lighting')fetch('/api/v2/lighting',{cache:'no-store'}).then(function(r){return r.json()}).then(function(c){$('ds-light-enabled').checked=!!c.enabled;$('ds-light-bright').value=c.brightness;$('ds-light-idle').value=statusRgbToHex(c.idle);$('ds-light-printing').value=statusRgbToHex(c.printing);$('ds-light-error').value=statusRgbToHex(c.error||[255,0,0]);$('ds-light-effect').value=c.effect||0;$('ds-light-speed').value=c.speed;}).catch(function(){});}
+  /* One table for the whole palette: the loader and the save body cannot drift
+     apart as DragonStatus adds printer states. Element id suffix -> API key. */
+  var statusPalette={fixed:'fixed',unbound:'unbound',idle:'idle',downloading:'downloading',preparing:'preparing',printing:'printing',paused:'paused',complete:'complete',error:'error'};
+  function statusLoadLighting(){
+    fetch('/api/v2/lighting',{cache:'no-store'}).then(function(r){return r.json();}).then(function(c){
+      $('ds-light-enabled').checked=!!c.enabled;
+      $('ds-light-bright').value=c.brightness;
+      $('ds-light-mode').value=c.mode||0;
+      $('ds-light-effect').value=c.effect||0;
+      $('ds-light-speed').value=c.speed;
+      $('ds-light-reverse').checked=!!c.reverse;
+      $('ds-light-hold').value=c.complete_hold_min==null?15:c.complete_hold_min;
+      $('ds-light-standby').value=c.standby_min==null?120:c.standby_min;
+      Object.keys(statusPalette).forEach(function(id){ $('ds-light-'+id).value=statusRgbToHex(c[statusPalette[id]]); });
+    }).catch(function(){});
+  }
+  function statusPage(page){$('ds-main').dataset.statusPage=page;document.querySelectorAll('.status-tab').forEach(function(t){t.setAttribute('aria-selected',String(t.dataset.statusPage===page));});if(page==='lighting')statusLoadLighting();}
   document.querySelectorAll('.status-tab').forEach(function(t){if(t.dataset.statusPage!=='settings')t.addEventListener('click',function(){statusPage(t.dataset.statusPage);});});
-  $('ds-light-save').addEventListener('click',function(){fetch('/api/v2/lighting',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:$('ds-light-enabled').checked,brightness:+$('ds-light-bright').value,idle:hexToRgb($('ds-light-idle').value),printing:hexToRgb($('ds-light-printing').value),error:hexToRgb($('ds-light-error').value),effect:+$('ds-light-effect').value,speed:+$('ds-light-speed').value})}).then(function(r){if(!r.ok)throw 0;$('ds-light-msg').textContent='Lighting saved.';}).catch(function(){$('ds-light-msg').textContent='Could not save lighting.';});});
+  $('ds-light-save').addEventListener('click',function(){
+    var body={
+      enabled:$('ds-light-enabled').checked,
+      brightness:+$('ds-light-bright').value,
+      mode:+$('ds-light-mode').value,
+      effect:+$('ds-light-effect').value,
+      speed:+$('ds-light-speed').value,
+      reverse:$('ds-light-reverse').checked,
+      complete_hold_min:parseInt($('ds-light-hold').value,10)||0,
+      standby_min:parseInt($('ds-light-standby').value,10)||0
+    };
+    Object.keys(statusPalette).forEach(function(id){ body[statusPalette[id]]=hexToRgb($('ds-light-'+id).value); });
+    fetch('/api/v2/lighting',{method:'POST',headers:hdr(),body:JSON.stringify(body)}).then(function(r){if(!r.ok)throw 0;$('ds-light-msg').textContent='Lighting saved.';}).catch(function(){$('ds-light-msg').textContent='Could not save lighting.';});
+  });
 
   function titleCase(value){
     return String(value||'unknown').replace(/[_-]+/g,' ').replace(/\b\w/g,function(c){ return c.toUpperCase(); });
@@ -1771,10 +1836,15 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     u('ds-wifi', titleCase(wifi.state));
     u('ds-version', s.firmware||'—');
     u('ds-footer-version', s.firmware||'—');
-    var source=printer.source||'standalone';
-    var connected=source!=='standalone' && state!=='unknown';
+    /* Firmware reports an unconfigured device as source 'none' with state
+       'standalone'; 'standalone' is also accepted as a source for older builds. */
+    var source=printer.source||'none';
+    var chosen=source!=='none' && source!=='standalone';
+    var connected=chosen && state!=='unknown' && state!=='standalone';
+    var cta=$('ds-setup-cta');
+    if(cta) cta.hidden=chosen;
     u('ds-light-state', connected ? 'Following printer status' : 'Ready for printer setup');
-    u('ds-light-detail', connected ? 'Factory status effects are following the printer state.' : 'Choose a Bambu or Moonraker printer in Device setup to begin status lighting.');
+    u('ds-light-detail', connected ? 'Status effects are following the printer state. Colours, effect, and the factory timers are configurable in Lighting.' : 'Choose a Bambu or Moonraker printer in Device setup to begin status lighting.');
     u('ds-summary', connected ? 'Tracking '+titleCase(state)+' from '+titleCase(source)+'.' : 'Connect a printer in Device setup to begin.');
     statusSetConn(true);
   }
