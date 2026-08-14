@@ -19,6 +19,16 @@ typedef enum {
     DC_BAMBU_SUBSCRIBED,    // receiving report updates
 } dc_bambu_state_t;
 
+typedef enum {
+    DC_BAMBU_PRINT_UNKNOWN,
+    DC_BAMBU_PRINT_IDLE,
+    DC_BAMBU_PRINT_PREPARING,
+    DC_BAMBU_PRINT_PRINTING,
+    DC_BAMBU_PRINT_PAUSED,
+    DC_BAMBU_PRINT_COMPLETE,
+    DC_BAMBU_PRINT_ERROR,
+} dc_bambu_print_state_t;
+
 typedef struct {
     char host[64];    // printer IP/hostname; empty string = unconfigured
     char serial[32];  // printer serial (embedded in the MQTT topic path)
@@ -37,6 +47,7 @@ typedef struct {
     // gates when a filament zone is applied.
     bool  error;          // gcode_state is FAILED (print failed / errored)
     float progress;       // mc_percent / 100, or -1 until the printer reports it
+    dc_bambu_print_state_t print_state; // normalized MQTT gcode_state phase
 } dc_bambu_status_t;
 
 esp_err_t dc_bambu_start(void);
