@@ -1,4 +1,4 @@
-version: "0.16.1"
+version: "0.18.0"
 description: Moonraker WebSocket client and Klipper status for Dragon firmware
 license: MIT
 dependencies:
