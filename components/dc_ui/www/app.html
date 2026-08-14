@@ -1117,7 +1117,8 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
           <div class="light-row"><label>Gradient range &deg;C</label><span class="light-range"><input type="number" id="dv-light-tmin" min="0" max="120" step="1"> &ndash; <input type="number" id="dv-light-tmax" min="0" max="120" step="1"></span></div>
           <div class="light-row"><label for="dv-light-effect">Effect</label><select id="dv-light-effect"><option value="0">Solid</option><option value="1">Cycle</option><option value="2">Rainbow</option><option value="3">Breathe</option><option value="4">Strobe</option><option value="5">Wave</option><option value="6">Marquee</option><option value="7">Cylon eye</option></select></div>
           <div class="light-row"><label for="dv-light-speed">Effect speed</label><input type="range" id="dv-light-speed" min="0" max="255"></div>
-          <div class="light-row"><label for="dv-light-reverse">Reverse LED direction</label><input type="checkbox" id="dv-light-reverse"></div>
+          <div class="light-row"><label id="dv-light-rev0-lbl" for="dv-light-rev0">Reverse strip 1</label><input type="checkbox" id="dv-light-rev0"></div>
+          <div class="light-row" id="dv-light-rev1-row"><label for="dv-light-rev1">Reverse strip 2</label><input type="checkbox" id="dv-light-rev1"></div>
           <div class="light-row"><label for="dv-light-useerror">Flash on print error</label><input type="checkbox" id="dv-light-useerror"></div>
           <div class="light-row"><label for="dv-light-error">Error color</label><input type="color" id="dv-light-error"></div>
           <p class="set-note">Printer-status colors (used when <em>Color follows</em> is <em>Printer status</em>). Printing uses the Printing color above; Error uses the Error color above.</p>
@@ -1870,7 +1871,12 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
       $('dv-light-prep').value=rgbToHex(c.prep);
       $('dv-light-paused').value=rgbToHex(c.paused);
       $('dv-light-complete').value=rgbToHex(c.complete);
-      $('dv-light-reverse').checked=!!c.reverse;
+      var rs=c.rev_strip||[!!c.reverse,!!c.reverse];
+      $('dv-light-rev0').checked=!!rs[0];
+      $('dv-light-rev1').checked=!!rs[1];
+      var two=(c.strips|0)>=2;
+      $('dv-light-rev1-row').hidden=!two;
+      $('dv-light-rev0-lbl').textContent=two?'Reverse strip 1':'Reverse LED direction';
     }).catch(function(){});
   }
   function filRow(name, seal){
@@ -2644,7 +2650,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
       prep: hexToRgb($('dv-light-prep').value),
       paused: hexToRgb($('dv-light-paused').value),
       complete: hexToRgb($('dv-light-complete').value),
-      reverse: $('dv-light-reverse').checked
+      rev_strip: [$('dv-light-rev0').checked, $('dv-light-rev1').checked]
     };
     ventFlash('dv-light-msg','Saving…');
     ventPost('/api/v2/lighting',body)
