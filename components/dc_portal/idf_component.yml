@@ -1,4 +1,4 @@
-version: "0.20.0"
+version: "0.21.0"
 description: Shared Dragon-family SPA, provisioning, captive portal, OTA, logs, and recovery service
 license: MIT
 dependencies:
