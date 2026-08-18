@@ -802,7 +802,6 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
             <input class="zone-in" type="number" min="0" max="70" step="1" id="s-preset-1" aria-label="Preset 2">
             <input class="zone-in" type="number" min="0" max="70" step="1" id="s-preset-2" aria-label="Preset 3">
             <input class="zone-in" type="number" min="0" max="70" step="1" id="s-preset-3" aria-label="Preset 4">
-            <button class="btn btn-primary" type="button" id="s-preset-save">Save</button>
           </div>
           <div class="mode-feedback" id="s-preset-msg" role="status" aria-live="polite"></div>
         </div>
@@ -2176,15 +2175,18 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
   }
   function fillPresetFields(list){ if(!Array.isArray(list))return; for(var i=0;i<4;i++){ var el=$('s-preset-'+i); if(el&&list[i]!=null) el.value=list[i]; } }
   function loadPresets(){ return fetch('/api/v2/presets',{cache:'no-store'}).then(function(r){return r.json();}).then(function(d){ applyPresets(d.presets); fillPresetFields(d.presets); return d.presets; }); }
-  var psave=$('s-preset-save');
-  if(psave) psave.addEventListener('click', function(){
+  /* Presets auto-save on edit — same live model as Filament zones, so there's no
+     Save button. Any field change clamps + POSTs all four; the dashboard buttons
+     update from the response, with a brief "Saved" confirmation. */
+  function savePresets(){
     var vals=[]; for(var i=0;i<4;i++){ vals.push(Math.max(0, Math.min(70, Math.round(Number($('s-preset-'+i).value)||0)))); }
-    $('s-preset-msg').textContent='Saving…';
+    fillPresetFields(vals);   // reflect clamping immediately
     fetch('/api/v2/presets',{method:'POST',headers:hdr(),body:JSON.stringify({presets:vals})})
       .then(function(r){ if(!r.ok) throw 0; return r.json(); })
-      .then(function(d){ applyPresets(d.presets); fillPresetFields(d.presets); $('s-preset-msg').textContent='Presets saved.'; })
-      .catch(function(){ $('s-preset-msg').textContent='Could not save presets.'; });
-  });
+      .then(function(d){ applyPresets(d.presets); fillPresetFields(d.presets); flash('s-preset-msg','Saved','is-ok'); })
+      .catch(function(){ flash('s-preset-msg','Could not save presets.','is-error'); });
+  }
+  for(var pi=0; pi<4; pi++){ var pe=$('s-preset-'+pi); if(pe) pe.addEventListener('change', savePresets); }
   loadPresets().catch(function(){});
 
   /* Status-area action: Stop -> off (the policy has no pause state; per #19 the
