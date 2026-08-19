@@ -3,6 +3,7 @@
 
 #include "cJSON.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "esp_websocket_client.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -27,6 +28,17 @@ static const char *TAG = "dc_moonraker";
 #define NETWORK_TIMEOUT_MS     10000
 #define RECONNECT_TIMEOUT_MS   5000
 
+// Keepalive + staleness watchdog. Moonraker pushes temperature updates roughly
+// once a second, so a subscribed connection that goes quiet is dead. Two layers
+// keep it alive: (1) WebSocket ping/pong so a half-open TCP is detected and the
+// client auto-reconnects; (2) an application watchdog that force-reconnects if
+// no status update arrives for STALE_TIMEOUT while we believe we're connected —
+// the case that froze a unit forever (connected, but silently not updating).
+#define PING_INTERVAL_SEC      10
+#define PINGPONG_TIMEOUT_SEC   15
+#define STALE_TIMEOUT_US       (45 * 1000000LL)
+#define WATCHDOG_PERIOD_MS     10000
+
 // Progress below this counts as "PREPARING" rather than "PRINTING", matching
 // stock's Bambu "PREPARE" state (downloading / slicing / warming up).
 #define PREPARING_PROGRESS_MAX 0.01f
@@ -40,6 +52,12 @@ static dc_moonraker_status_t     s_status = {
 };
 static char                     *s_rx_buf = NULL;
 static size_t                    s_rx_off = 0;
+
+// Watchdog: timestamp of the last status update received, and the watchdog task
+// handle. s_last_rx_us is refreshed on connect, subscribe, and every
+// notify_status_update; the watchdog reconnects if it goes stale.
+static int64_t                   s_last_rx_us = 0;
+static TaskHandle_t              s_watchdog   = NULL;
 
 // Latest raw Klipper values seen so we can re-derive the six-state model
 // whenever any of them changes.
@@ -311,6 +329,7 @@ static void handle_frame(const char *json, size_t len)
             xSemaphoreTake(s_lock, portMAX_DELAY);
             merge_status_object(status);
             s_status.state = DC_MK_SUBSCRIBED;
+            s_last_rx_us = esp_timer_get_time();
             xSemaphoreGive(s_lock);
             ESP_LOGI(TAG, "subscribed; initial state=%s bed=%.1f material=%s",
                      dc_printer_state_str(s_status.printer),
@@ -364,6 +383,7 @@ static void handle_frame(const char *json, size_t len)
                 cJSON *delta = cJSON_GetArrayItem(params, 0);
                 xSemaphoreTake(s_lock, portMAX_DELAY);
                 merge_status_object(delta);
+                s_last_rx_us = esp_timer_get_time();
                 xSemaphoreGive(s_lock);
             }
             maybe_fetch_metadata();   // fetch filament_type when a new print loads
@@ -493,6 +513,7 @@ static void ws_event(void *arg, esp_event_base_t base, int32_t id, void *data)
         dc_evlog_add("moonraker connected");
         xSemaphoreTake(s_lock, portMAX_DELAY);
         s_status.state = DC_MK_CONNECTED;
+        s_last_rx_us = esp_timer_get_time();   // give the new link time to subscribe
         xSemaphoreGive(s_lock);
         send_subscribe();
         break;
@@ -548,6 +569,11 @@ static esp_err_t start_client(void)
         .uri                  = uri,
         .reconnect_timeout_ms = RECONNECT_TIMEOUT_MS,
         .network_timeout_ms   = NETWORK_TIMEOUT_MS,
+        // Ping/pong keepalive: a missed pong (half-open TCP) closes the socket
+        // so the built-in auto-reconnect runs, instead of freezing forever.
+        .ping_interval_sec       = PING_INTERVAL_SEC,
+        .pingpong_timeout_sec    = PINGPONG_TIMEOUT_SEC,
+        .disable_pingpong_discon = false,
     };
     s_ws = esp_websocket_client_init(&wc);
     if (s_ws == NULL) return ESP_FAIL;
@@ -563,6 +589,32 @@ static esp_err_t start_client(void)
     return ESP_OK;
 }
 
+// Reconnect if a subscribed connection goes silent. Ping/pong (above) catches a
+// dead TCP; this catches the subtler case where we stay "connected" but stop
+// receiving status updates (a silently-dropped subscription) — which froze a
+// unit on stale idle data forever. Mirrors set_config's stop+start-under-lock.
+static void watchdog_task(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        vTaskDelay(pdMS_TO_TICKS(WATCHDOG_PERIOD_MS));
+        xSemaphoreTake(s_lock, portMAX_DELAY);
+        bool configured = (s_cfg.host[0] != '\0');
+        dc_moonraker_state_t st = s_status.state;
+        bool live = (st == DC_MK_CONNECTED || st == DC_MK_SUBSCRIBED);
+        int64_t idle_us = esp_timer_get_time() - s_last_rx_us;
+        if (configured && live && idle_us > STALE_TIMEOUT_US) {
+            ESP_LOGW(TAG, "no Moonraker update in %llds; forcing reconnect",
+                     (long long)(idle_us / 1000000));
+            dc_evlog_add("moonraker stale; reconnecting");
+            stop_client();
+            start_client();
+            s_last_rx_us = esp_timer_get_time();   // give the fresh link time to subscribe
+        }
+        xSemaphoreGive(s_lock);
+    }
+}
+
 esp_err_t dc_moonraker_start(void)
 {
     if (s_lock != NULL) return ESP_ERR_INVALID_STATE;
@@ -571,6 +623,14 @@ esp_err_t dc_moonraker_start(void)
 
     s_rx_buf = malloc(RX_BUF_BYTES);
     if (s_rx_buf == NULL) return ESP_ERR_NO_MEM;
+
+    s_last_rx_us = esp_timer_get_time();
+    // Runs for the life of the component; it no-ops until a host is configured,
+    // so create it once here even if we start out with no Moonraker config.
+    if (s_watchdog == NULL &&
+        xTaskCreate(watchdog_task, "mk_wdog", 3072, NULL, 4, &s_watchdog) != pdPASS) {
+        ESP_LOGW(TAG, "watchdog task create failed");
+    }
 
     esp_err_t err = nvs_load(&s_cfg);
     if (err != ESP_OK || s_cfg.host[0] == '\0') {
