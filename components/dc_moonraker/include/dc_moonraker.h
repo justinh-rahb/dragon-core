@@ -48,6 +48,15 @@ typedef struct {
     float                progress;     // 0..1 from virtual_sdcard.progress
     char                 filename[64]; // print_stats.filename
     char                 material[16]; // from save_variables.material or gcode metadata; upper-case
+    // Paired DragonBreath chamber heater, as published by the dragonbreath-klipper
+    // helper's [dragonbreath] object (absent -> db_present=false). Lets a product
+    // (e.g. DragonVent) seal while the chamber is deliberately heating.
+    bool                 db_present;   // the dragonbreath object was seen at all
+    bool                 db_connected; // helper reports the device reachable
+    bool                 db_fault;     // device fault latched
+    bool                 db_inhibited; // device inhibited (safety)
+    float                db_target;    // device_target (°C); >0 = commanded to heat
+    char                 db_mode[12];  // off / power_on / auto / drying
 } dc_moonraker_status_t;
 
 esp_err_t dc_moonraker_start(void);
