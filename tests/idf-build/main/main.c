@@ -19,6 +19,7 @@ void app_main(void)
     dc_bambu_config_t bambu_config = {0};
     dc_moonraker_config_t moonraker_config = {0};
     dc_lighting_output_t lighting_output = {0};
+    dc_lighting_stats_t lighting_stats = {0};
     // Config APIs are deliberately valid before either client is started. Shared
     // provisioning uses this to edit inactive sources without losing saved fields.
     (void)dc_bambu_get_config(&bambu_config);
@@ -28,6 +29,7 @@ void app_main(void)
     (void)dc_mqtt_start(&mqtt_config, &mqtt);
     (void)dc_mqtt_destroy(mqtt);
     (void)dc_lighting_start(&(dc_lighting_config_t){ .outputs = &lighting_output });
+    dc_lighting_get_stats(&lighting_stats);
     (void)dc_lighting_set_brightness(0);
     (void)dc_lighting_set_output_reverse(0, false);
     (void)dc_ui_spa_asset();
