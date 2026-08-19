@@ -292,6 +292,28 @@ static void merge_status_object(cJSON *status)
         if (cJSON_IsNumber(t)) s_status.chamber_temp = (float)t->valuedouble;
     }
 
+    // Paired DragonBreath chamber heater via the dragonbreath-klipper helper's
+    // [dragonbreath] object. Absent on installs without the helper (cJSON returns
+    // NULL) -> db_present stays false and consumers ignore it. Fields are a delta
+    // like every other object, so only overwrite what's present.
+    cJSON *db = cJSON_GetObjectItemCaseSensitive(status, "dragonbreath");
+    if (cJSON_IsObject(db)) {
+        s_status.db_present = true;
+        cJSON *v;
+        if ((v = cJSON_GetObjectItemCaseSensitive(db, "device_target")) && cJSON_IsNumber(v))
+            s_status.db_target = (float)v->valuedouble;
+        if ((v = cJSON_GetObjectItemCaseSensitive(db, "connected")) && cJSON_IsBool(v))
+            s_status.db_connected = cJSON_IsTrue(v);
+        if ((v = cJSON_GetObjectItemCaseSensitive(db, "fault")) && cJSON_IsBool(v))
+            s_status.db_fault = cJSON_IsTrue(v);
+        if ((v = cJSON_GetObjectItemCaseSensitive(db, "inhibited")) && cJSON_IsBool(v))
+            s_status.db_inhibited = cJSON_IsTrue(v);
+        if ((v = cJSON_GetObjectItemCaseSensitive(db, "mode")) && cJSON_IsString(v)) {
+            strncpy(s_status.db_mode, v->valuestring, sizeof(s_status.db_mode) - 1);
+            s_status.db_mode[sizeof(s_status.db_mode) - 1] = '\0';
+        }
+    }
+
     // Material: read from save_variables.variables.material. Users opt in by
     // adding `SAVE_VARIABLE VARIABLE=material VALUE='"{material}"'` to their
     // PRINT_START macro. Uppercased so PLA/pla/Pla all compare equal.
@@ -436,7 +458,8 @@ static void send_subscribe(void)
             "\"extruder\":null,"
             "\"toolhead\":null,"
             "\"heater_generic chamber\":null,"
-            "\"save_variables\":null"
+            "\"save_variables\":null,"
+            "\"dragonbreath\":null"
         "}},"
         "\"id\":1}";
     int sent = esp_websocket_client_send_text(s_ws, req, strlen(req),
