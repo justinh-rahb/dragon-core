@@ -60,7 +60,27 @@ typedef struct {
     dc_lighting_layout_t layout;
 } dc_lighting_config_t;
 
+/* Renderer health. The strip driver can fail on every frame while the render
+ * task keeps looping, which from outside is indistinguishable from correctly
+ * rendering a black frame: the product reports a healthy config, the mutex
+ * cycles normally, and the bar stays dark with nothing logged anywhere. These
+ * counters make that state observable, including over a product's HTTP API
+ * when no serial console is attached. */
+typedef struct {
+    uint32_t frames;           /* frames rendered since start */
+    uint32_t refresh_errors;   /* frames where led_strip_refresh() failed */
+    uint32_t pixel_errors;     /* frames where a pixel write failed */
+    esp_err_t last_error;      /* most recent driver error; ESP_OK if none yet */
+    int64_t last_error_us;     /* esp_timer stamp of that error, 0 if none */
+    bool failing;              /* the most recent frame did not render cleanly */
+    dc_rgb_t color;            /* colour the renderer is currently painting */
+    uint8_t effect;
+    uint8_t brightness;
+} dc_lighting_stats_t;
+
 esp_err_t dc_lighting_start(const dc_lighting_config_t *config);
+/* Safe before dc_lighting_start(): reports a zeroed snapshot. */
+void dc_lighting_get_stats(dc_lighting_stats_t *out);
 esp_err_t dc_lighting_set(dc_rgb_t color, dc_lighting_effect_t effect, uint8_t speed);
 esp_err_t dc_lighting_set_brightness(uint8_t brightness);
 esp_err_t dc_lighting_set_output_reverse(uint8_t output, bool reverse);

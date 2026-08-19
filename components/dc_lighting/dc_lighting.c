@@ -2,6 +2,7 @@
 
 #include "driver/spi_common.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
@@ -20,6 +21,17 @@ static float s_audio_level;
 static dc_rgb_t s_color;
 static dc_lighting_effect_t s_effect;
 static SemaphoreHandle_t s_lock;
+
+/* Renderer health, written by the render task under s_lock. */
+static uint32_t s_frames, s_refresh_errors, s_pixel_errors;
+static esp_err_t s_last_error = ESP_OK;
+static int64_t s_last_error_us, s_last_error_log_us;
+static bool s_failing;
+
+/* The console ring holds ~180 lines, so complaining once per frame would erase
+ * the boot context that makes a failure diagnosable. Log transitions instead,
+ * and leave the continuous view to the counters. */
+#define DC_LIGHTING_ERROR_LOG_INTERVAL_US (30LL * 1000000LL)
 
 static uint8_t scale(uint8_t value, uint8_t level) { return (uint16_t)value * level / 255; }
 
@@ -55,6 +67,7 @@ static void frame(uint32_t tick)
         level = 0;
     }
 
+    bool pixel_failed = false, refresh_failed = false;
     uint16_t output_offset = 0;
     for (uint8_t i = 0; i < s_count; ++i) {
         for (uint16_t p = 0; p < s_output[i].pixels; ++p) {
@@ -96,11 +109,53 @@ static void frame(uint32_t tick)
                 pixel_level = on ? s_brightness : 0;
             }
             uint16_t index = s_output[i].reverse ? s_output[i].pixels - 1 - p : p;
-            led_strip_set_pixel(s_strip[i], index, scale(color.r, pixel_level), scale(color.g, pixel_level), scale(color.b, pixel_level));
+            esp_err_t err = led_strip_set_pixel(s_strip[i], index, scale(color.r, pixel_level), scale(color.g, pixel_level), scale(color.b, pixel_level));
+            if (err != ESP_OK && !pixel_failed) { pixel_failed = true; s_last_error = err; }
         }
-        led_strip_refresh(s_strip[i]);
+        esp_err_t err = led_strip_refresh(s_strip[i]);
+        if (err != ESP_OK && !refresh_failed) { refresh_failed = true; s_last_error = err; }
         output_offset += s_output[i].pixels;
     }
+
+    ++s_frames;
+    if (pixel_failed) ++s_pixel_errors;
+    if (refresh_failed) ++s_refresh_errors;
+    if (pixel_failed || refresh_failed) {
+        int64_t now = esp_timer_get_time();
+        s_last_error_us = now;
+        /* First failure is always reported; a persistent one repeats slowly so
+         * the ring keeps both the onset and the surrounding context. */
+        if (!s_failing || now - s_last_error_log_us >= DC_LIGHTING_ERROR_LOG_INTERVAL_US) {
+            ESP_LOGW(TAG, "strip output failing: %s (frame %lu, refresh_err=%lu pixel_err=%lu)",
+                     esp_err_to_name(s_last_error), (unsigned long)s_frames,
+                     (unsigned long)s_refresh_errors, (unsigned long)s_pixel_errors);
+            s_last_error_log_us = now;
+        }
+        s_failing = true;
+    } else if (s_failing) {
+        ESP_LOGI(TAG, "strip output recovered at frame %lu (refresh_err=%lu pixel_err=%lu)",
+                 (unsigned long)s_frames, (unsigned long)s_refresh_errors, (unsigned long)s_pixel_errors);
+        s_failing = false;
+    }
+}
+
+void dc_lighting_get_stats(dc_lighting_stats_t *out)
+{
+    if (!out) return;
+    if (!s_lock) { *out = (dc_lighting_stats_t){ .last_error = ESP_OK }; return; }
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    *out = (dc_lighting_stats_t){
+        .frames = s_frames,
+        .refresh_errors = s_refresh_errors,
+        .pixel_errors = s_pixel_errors,
+        .last_error = s_last_error,
+        .last_error_us = s_last_error_us,
+        .failing = s_failing,
+        .color = s_color,
+        .effect = (uint8_t)s_effect,
+        .brightness = s_brightness,
+    };
+    xSemaphoreGive(s_lock);
 }
 
 static void render_task(void *arg)
