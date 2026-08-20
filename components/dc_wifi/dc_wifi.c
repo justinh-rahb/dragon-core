@@ -233,7 +233,7 @@ static void build_default_ap_ssid(char *out, size_t out_sz)
 // Populate `out` with the effective AP config: NVS values if set, defaults
 // otherwise (MAC-derived SSID, hardcoded password, 192.168.4.1).
 // Read the AP mode, migrating the legacy KEY_AP_EN bool if the new key is absent:
-// on -> the recovery-window default (TEMP), off -> OFF.
+// on -> the default (always on), off -> OFF.
 static dc_wifi_ap_mode_t load_ap_mode(nvs_handle_t h)
 {
     uint8_t m;
@@ -706,7 +706,7 @@ const char *dc_wifi_ap_mode_to_str(dc_wifi_ap_mode_t mode)
     case DC_WIFI_AP_ALWAYS: return "always";
     case DC_WIFI_AP_TEMP:   return "temp";
     case DC_WIFI_AP_OFF:    return "off";
-    default:                return "temp";
+    default:                return "always";
     }
 }
 

@@ -49,9 +49,8 @@ typedef enum {
 
 // Minutes the DC_WIFI_AP_TEMP window stays open after boot.
 #define DC_WIFI_AP_TEMP_MINUTES 15
-// Default when nothing is stored: a recovery window each boot, without a
-// permanently-broadcast AP.
-#define DC_WIFI_AP_MODE_DEFAULT DC_WIFI_AP_TEMP
+// Default when nothing is stored: the setup/recovery AP is always reachable.
+#define DC_WIFI_AP_MODE_DEFAULT DC_WIFI_AP_ALWAYS
 
 // "off" / "always" / "temp" <-> enum, shared by the product portals so their
 // wire formats never drift.

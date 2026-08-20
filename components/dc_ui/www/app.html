@@ -1439,7 +1439,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     var select=$('dc-wifi-network');select.replaceChildren();var first=document.createElement('option');first.value='';first.textContent=(d.networks||[]).length?'Choose a network':'No scan results yet';select.appendChild(first);
     (d.networks||[]).forEach(function(n){var o=document.createElement('option');o.value=n.ssid;o.textContent=n.ssid+' · '+n.rssi+' dBm'+(n.secured?' · secured':'');select.appendChild(o);});
     var ap=d.fallback_ap||{};$('dc-ap-ssid').value=ap.ssid||'';$('dc-ap-password').value='';$('dc-ap-ip').value=ap.ip||'';
-    var apMode=ap.ap_mode||'temp',apSel=$('dc-ap-mode');
+    var apMode=ap.ap_mode||'always',apSel=$('dc-ap-mode');
     // 'off' is API-only; reflect it if already set without offering it as a fresh choice
     if(apMode==='off'&&!apSel.querySelector('option[value="off"]')){var apOff=document.createElement('option');apOff.value='off';apOff.textContent='Off (set via API)';apSel.appendChild(apOff);}
     apSel.value=apMode;
