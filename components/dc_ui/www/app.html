@@ -1241,11 +1241,12 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
       <div class="provision-actions"><button class="btn" type="button" id="dc-wifi-scan">Rescan</button><button class="btn btn-primary" type="button" id="dc-wifi-save">Save Wi-Fi &amp; reboot</button></div>
       <div class="provision-msg" id="dc-wifi-msg"></div>
     </article>
-    <article class="provision-card"><h3>Fallback setup AP</h3>
+    <article class="provision-card"><h3>Setup / recovery access point</h3>
       <div class="provision-grid">
         <div class="provision-field"><label for="dc-ap-ssid">SSID (blank = default)</label><input id="dc-ap-ssid"></div>
         <div class="provision-field"><label for="dc-ap-password">Password (blank = default)</label><input id="dc-ap-password" type="password" autocomplete="new-password"></div>
         <div class="provision-field"><label for="dc-ap-ip">Gateway IPv4</label><input id="dc-ap-ip" inputmode="decimal"></div>
+        <div class="provision-field"><label for="dc-ap-mode">Availability</label><select id="dc-ap-mode"><option value="always">Always on</option><option value="temp">On for 15 min after reboot</option></select></div>
       </div>
       <div class="provision-actions"><button class="btn btn-primary" type="button" id="dc-ap-save">Save AP &amp; reboot</button></div><div class="provision-msg" id="dc-ap-msg"></div>
     </article>
@@ -1438,6 +1439,10 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     var select=$('dc-wifi-network');select.replaceChildren();var first=document.createElement('option');first.value='';first.textContent=(d.networks||[]).length?'Choose a network':'No scan results yet';select.appendChild(first);
     (d.networks||[]).forEach(function(n){var o=document.createElement('option');o.value=n.ssid;o.textContent=n.ssid+' · '+n.rssi+' dBm'+(n.secured?' · secured':'');select.appendChild(o);});
     var ap=d.fallback_ap||{};$('dc-ap-ssid').value=ap.ssid||'';$('dc-ap-password').value='';$('dc-ap-ip').value=ap.ip||'';
+    var apMode=ap.ap_mode||'temp',apSel=$('dc-ap-mode');
+    // 'off' is API-only; reflect it if already set without offering it as a fresh choice
+    if(apMode==='off'&&!apSel.querySelector('option[value="off"]')){var apOff=document.createElement('option');apOff.value='off';apOff.textContent='Off (set via API)';apSel.appendChild(apOff);}
+    apSel.value=apMode;
     renderProductSetup(d.product_setup);
     var tokCard=$('dc-token-card'); if(tokCard) tokCard.hidden=(product!=='dragonbreath');
     addPwToggles();
@@ -1454,7 +1459,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
   // The fallback AP has no UI on/off (disabling it risks a lockout); a UI save
   // always keeps it enabled. The API (/api/v1/provisioning/ap) still accepts
   // enabled:false for advanced/programmatic use.
-  $('dc-ap-save').addEventListener('click',function(){setupMessage('dc-ap-msg','Saving…');dcRequest('/api/v1/provisioning/ap',{ssid:$('dc-ap-ssid').value,password:$('dc-ap-password').value,ip:$('dc-ap-ip').value,enabled:true}).then(function(){setupMessage('dc-ap-msg','Saved. Rebooting…');}).catch(function(j){setupMessage('dc-ap-msg',j.error||'Could not save AP settings.',true);});});
+  $('dc-ap-save').addEventListener('click',function(){setupMessage('dc-ap-msg','Saving…');dcRequest('/api/v1/provisioning/ap',{ssid:$('dc-ap-ssid').value,password:$('dc-ap-password').value,ip:$('dc-ap-ip').value,ap_mode:$('dc-ap-mode').value}).then(function(){setupMessage('dc-ap-msg','Saved. Rebooting…');}).catch(function(j){setupMessage('dc-ap-msg',j.error||'Could not save AP settings.',true);});});
   $('dc-load-logs').addEventListener('click',function(){dcFetchJson('/api/v1/system/logs',{cache:'no-store'}).then(function(j){$('dc-logs').textContent=(j.entries||[]).map(function(e){return '['+e.ms+' ms] '+e.text;}).join('\n');}).catch(function(){setupMessage('dc-system-msg','Could not load logs.',true);});});
   var sFwBtn=$('s-fw-update'); if(sFwBtn) sFwBtn.addEventListener('click',function(){openProvisioning();});
   $('dc-ota-upload').addEventListener('click',function(){var f=$('dc-ota-file').files[0];if(!f){setupMessage('dc-system-msg','Choose a firmware .bin first.',true);return;}otaUpload(f,false);});

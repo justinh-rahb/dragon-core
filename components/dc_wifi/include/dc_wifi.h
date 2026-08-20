@@ -31,16 +31,41 @@ typedef struct {
 // If omitted, family-neutral Dragon defaults are used.
 esp_err_t dc_wifi_set_identity(const dc_wifi_identity_t *identity);
 
+// AP hotspot lifecycle. The AP + captive portal is ALWAYS brought up when there
+// are no saved STA credentials (first-boot setup is otherwise impossible); this
+// mode governs the AP only once STA credentials exist. Unlike the old fallback
+// model, ALWAYS/TEMP bring the AP up concurrently with STA (reachable even when
+// Wi-Fi is working); the AP's own WPA2 password is its access gate.
+typedef enum {
+    DC_WIFI_AP_OFF    = 0,  // no concurrent AP (API-only; not offered in the UI).
+                            //   STA-only. A wrong-credential STA failure leaves
+                            //   no AP — recover with `flash.py --erase-nvs` or the
+                            //   on-device Power+Auto reset combo.
+    DC_WIFI_AP_ALWAYS = 1,  // AP stays up alongside STA, indefinitely.
+    DC_WIFI_AP_TEMP   = 2,  // AP up for DC_WIFI_AP_TEMP_MINUTES after boot, then
+                            //   dropped — unless STA never connected, in which
+                            //   case the AP is kept as the recovery portal.
+} dc_wifi_ap_mode_t;
+
+// Minutes the DC_WIFI_AP_TEMP window stays open after boot.
+#define DC_WIFI_AP_TEMP_MINUTES 15
+// Default when nothing is stored: a recovery window each boot, without a
+// permanently-broadcast AP.
+#define DC_WIFI_AP_MODE_DEFAULT DC_WIFI_AP_TEMP
+
+// "off" / "always" / "temp" <-> enum, shared by the product portals so their
+// wire formats never drift.
+const char *dc_wifi_ap_mode_to_str(dc_wifi_ap_mode_t mode);
+dc_wifi_ap_mode_t dc_wifi_ap_mode_from_str(const char *s, dc_wifi_ap_mode_t fallback);
+
 // AP hotspot configuration, overridable via the portal. Empty strings and
 // ip == 0 select the built-in defaults (MAC-derived SSID, "987654321",
 // 192.168.4.1). Stored in NVS under app_nvs.
 typedef struct {
-    char     ssid[33];      // "" → configured product prefix + MAC suffix
-    char     password[65];  // "" → default 987654321 (WPA2-PSK requires ≥ 8 chars)
-    uint32_t ip;            // host byte order; 0 → default 192.168.4.1
-    bool     enabled;       // false = don't fall back to AP if STA fails
-                            // (still start AP if there are no saved STA creds
-                            // at all — otherwise the device is unrecoverable)
+    char              ssid[33];      // "" → configured product prefix + MAC suffix
+    char              password[65];  // "" → default 987654321 (WPA2-PSK needs ≥ 8)
+    uint32_t          ip;            // host byte order; 0 → default 192.168.4.1
+    dc_wifi_ap_mode_t mode;          // see dc_wifi_ap_mode_t
 } dc_wifi_ap_config_t;
 
 #define DC_WIFI_SCAN_MAX 20
