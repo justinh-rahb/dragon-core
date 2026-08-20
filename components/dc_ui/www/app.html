@@ -715,7 +715,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
 
       <!-- Automatic: follow the printer bed above a threshold (auto command). -->
       <section class="page-only mode-controls" data-page-content="auto" data-capability="auto">
-        <p><strong>Automatic mode:</strong> while a print runs, the chamber follows the loaded filament's profile — set the per-filament targets in <strong>Filament Zones</strong> on the dashboard. With no print, or a filament that has no zone set, the chamber stays idle. Requires a connected printer (Klipper or Bambu).</p>
+        <p id="a-desc"><strong>Automatic mode:</strong> while a print runs, the chamber follows the loaded filament's profile — set the per-filament targets in <strong>Filament Zones</strong> on the dashboard. With no print, or a filament that has no zone set, the chamber stays idle. Requires a connected printer (Klipper or Bambu).</p>
         <div class="ctl-group" hidden>
           <div class="ctl-head">
             <span class="form-label">Chamber target</span>
@@ -1662,10 +1662,20 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
   function modeLabel(m){
     return m==='power_on' ? 'Manual' : m==='auto' ? 'Auto' : m==='drying' ? 'Dry' : 'Idle';
   }
+  // Bed-follow source: AUTO follows the printer BED (setpoint threshold -> chamber
+  // target) because the source reports no filament type; filament-aware sources follow
+  // the loaded filament's zone profile instead. Driven entirely by the firmware's
+  // per-source capability flag (dc_source_has_filament, in /api/v2/state) — no source
+  // names are hardcoded in the UI, so adding a bed-only printer is a firmware one-liner.
+  function isBedFollow(s){
+    return !!(s && s.environment && s.environment.source_has_filament === false);
+  }
   function summary(st, s){
     if(st==='fault') return (s.safety.inhibited?'Inhibited: ':'Fault: ')+(s.safety.reason||'unknown');
     if(st==='drying'){ var m=Math.round((s.drying.remaining_seconds||0)/60); return 'Filament drying — '+m+' min left. Safety chain healthy.'; }
-    if(st==='waiting') return 'Armed. Waiting for a print with a filament profile.';
+    if(st==='waiting') return isBedFollow(s)
+      ? 'Armed. Waiting for the printer bed to reach the threshold.'
+      : 'Armed. Waiting for a print with a filament profile.';
     if(st==='heating') return s.heater.output ? 'Output active. Safety chain healthy.' : 'Heater demand — waiting on the safety chain.';
     if(st==='cooldown') return 'Residual-heat purge — fan clearing heat, heater off.';
     if(st==='filtering') return 'Fan-only filtration — heater off, monitoring active.';
@@ -2026,9 +2036,9 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     var autoRow = s.mode==='auto';
     $('db-auto-row').hidden = !autoRow;
     if(autoRow) u('db-auto', s.environment.auto_engaged
-      ? 'heating to filament profile · '+Math.round(s.target.effective_c)+' °C'
+      ? (isBedFollow(s) ? 'following the bed · ' : 'heating to filament profile · ')+Math.round(s.target.effective_c)+' °C'
       : s.environment.auto_filtering ? 'filtering (fan only)'
-      : 'waiting for a print');
+      : (isBedFollow(s) ? 'waiting for the bed threshold' : 'waiting for a print'));
     var dryRow = s.drying.active;
     $('db-drying-row').hidden = !dryRow;
     if(dryRow) u('db-drying', fmtDur(s.drying.remaining_seconds)+' left');
@@ -2264,11 +2274,29 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
   }
   function renderAuto(s){
     var armed = s.mode==='auto', eng = s.environment.auto_engaged;
-    setAction('a-action', armed?'Disengage':'Follow filament profile', armed?'#i-square':'#i-refresh', armed);
+    // Source capability: bed-follow sources (Prusa) set the chamber via the bed
+    // threshold + target controls below; filament-aware sources (Klipper/Bambu)
+    // follow the loaded filament's zone. Toggle the AUTO card to match the source.
+    var bedFollow = isBedFollow(s);
+    var tgtGrp = document.getElementById('a-range').closest('.ctl-group');
+    var bedGrp = document.getElementById('a-bed-range').closest('.ctl-group');
+    if(tgtGrp) tgtGrp.hidden = !bedFollow;
+    if(bedGrp) bedGrp.hidden = !bedFollow;
+    var desc = document.getElementById('a-desc');
+    if(desc) desc.innerHTML = bedFollow
+      ? '<strong>Automatic mode:</strong> the chamber follows the printer’s bed — while a print runs it heats to the <strong>Chamber target</strong> once the bed setpoint reaches the <strong>Bed threshold</strong> below. Your printer reports no filament type, so set the bed→chamber rule here.'
+      : '<strong>Automatic mode:</strong> while a print runs, the chamber follows the loaded filament’s profile — set the per-filament targets in <strong>Filament Zones</strong> on the dashboard. With no print, or a filament that has no zone set, the chamber stays idle. Requires a connected printer (Klipper or Bambu).';
+    setAction('a-action', armed?'Disengage':(bedFollow?'Follow the printer bed':'Follow filament profile'),
+              armed?'#i-square':'#i-refresh', armed);
     var mat = s.environment.material;
     var tgt = Math.round(s.target.effective_c);
     if(s.environment.control_source==='klipper' && !s.environment.moonraker_connected)
       setStatus('a-status', 'Moonraker not connected — AUTO needs a printer link.', 'is-warn');
+    else if(bedFollow){
+      if(eng) setStatus('a-status', 'Engaged — heating the chamber to '+tgt+' °C.', 'is-live');
+      else if(armed) setStatus('a-status', 'Armed — waiting for the printer bed to reach the threshold.', 'is-live');
+      else setStatus('a-status', 'Not armed.');
+    }
     else if(eng) setStatus('a-status', 'Engaged — heating to '+(mat?mat+' ':'')+'profile ('+tgt+' °C).', 'is-live');
     else if(armed) setStatus('a-status', 'Armed — waiting for a print with a filament profile.', 'is-live');
     else setStatus('a-status', 'Not armed.');
