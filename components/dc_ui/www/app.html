@@ -1449,7 +1449,9 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     if(d.last_failure)setupMessage('dc-wifi-msg','Could not join '+d.last_failure.ssid+': '+d.last_failure.reason,true);
   }
   function loadProvisioning(){
-    return dcFetchJson('/api/v1/provisioning',{cache:'no-store'}).then(applyProvisioning);
+    // Resolve to the fetched data so callers (e.g. the AP-mode auto-open below)
+    // can read network_mode; applyProvisioning itself returns nothing.
+    return dcFetchJson('/api/v1/provisioning',{cache:'no-store'}).then(function(d){applyProvisioning(d);return d;});
   }
   function openProvisioning(target){ $('dc-provisioning').hidden=false; location.hash='setup'; loadProvisioning().then(function(){ if(target){var el=$(target); if(el)el.scrollIntoView({behavior:'smooth',block:'start'}); } }).catch(function(){setupMessage('dc-system-msg','Provisioning service is unavailable in this firmware.',true);}); }
   document.querySelectorAll('[data-open-provisioning]').forEach(function(a){a.addEventListener('click',function(e){e.preventDefault();openProvisioning();});});
