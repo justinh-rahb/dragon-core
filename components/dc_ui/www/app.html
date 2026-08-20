@@ -1246,7 +1246,6 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
         <div class="provision-field"><label for="dc-ap-ssid">SSID (blank = default)</label><input id="dc-ap-ssid"></div>
         <div class="provision-field"><label for="dc-ap-password">Password (blank = default)</label><input id="dc-ap-password" type="password" autocomplete="new-password"></div>
         <div class="provision-field"><label for="dc-ap-ip">Gateway IPv4</label><input id="dc-ap-ip" inputmode="decimal"></div>
-        <div class="provision-field"><label for="dc-ap-enabled">Fallback</label><select id="dc-ap-enabled"><option value="1">Enabled</option><option value="0">Disabled</option></select></div>
       </div>
       <div class="provision-actions"><button class="btn btn-primary" type="button" id="dc-ap-save">Save AP &amp; reboot</button></div><div class="provision-msg" id="dc-ap-msg"></div>
     </article>
@@ -1438,7 +1437,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     setupData=d;product=d.product||product;u('dc-setup-title',(d.display_name||'Dragon Device')+' setup');u('dc-setup-mode',d.network_mode==='ap'?'Connected to the device setup network':'Managing this device on your LAN');
     var select=$('dc-wifi-network');select.replaceChildren();var first=document.createElement('option');first.value='';first.textContent=(d.networks||[]).length?'Choose a network':'No scan results yet';select.appendChild(first);
     (d.networks||[]).forEach(function(n){var o=document.createElement('option');o.value=n.ssid;o.textContent=n.ssid+' · '+n.rssi+' dBm'+(n.secured?' · secured':'');select.appendChild(o);});
-    var ap=d.fallback_ap||{};$('dc-ap-ssid').value=ap.ssid||'';$('dc-ap-password').value='';$('dc-ap-ip').value=ap.ip||'';$('dc-ap-enabled').value=ap.enabled===false?'0':'1';
+    var ap=d.fallback_ap||{};$('dc-ap-ssid').value=ap.ssid||'';$('dc-ap-password').value='';$('dc-ap-ip').value=ap.ip||'';
     renderProductSetup(d.product_setup);
     var tokCard=$('dc-token-card'); if(tokCard) tokCard.hidden=(product!=='dragonbreath');
     addPwToggles();
@@ -1452,7 +1451,10 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
   $('dc-setup-close').addEventListener('click',function(){$('dc-provisioning').hidden=true;if(location.hash==='#setup')history.replaceState(null,'',location.pathname);});
   $('dc-wifi-scan').addEventListener('click',function(){setupMessage('dc-wifi-msg','Scanning…');dcRequest('/api/v1/provisioning/scan',{}).then(function(){setTimeout(loadProvisioning,1800);}).catch(function(j){setupMessage('dc-wifi-msg',j.error||'Scan failed.',true);});});
   $('dc-wifi-save').addEventListener('click',function(){var ssid=$('dc-wifi-network').value||$('dc-wifi-manual').value.trim();setupMessage('dc-wifi-msg','Saving…');dcRequest('/api/v1/provisioning/wifi',{ssid:ssid,password:$('dc-wifi-password').value}).then(function(){setupMessage('dc-wifi-msg','Saved. Rebooting…');}).catch(function(j){setupMessage('dc-wifi-msg',j.error||'Could not save Wi-Fi.',true);});});
-  $('dc-ap-save').addEventListener('click',function(){setupMessage('dc-ap-msg','Saving…');dcRequest('/api/v1/provisioning/ap',{ssid:$('dc-ap-ssid').value,password:$('dc-ap-password').value,ip:$('dc-ap-ip').value,enabled:$('dc-ap-enabled').value==='1'}).then(function(){setupMessage('dc-ap-msg','Saved. Rebooting…');}).catch(function(j){setupMessage('dc-ap-msg',j.error||'Could not save AP settings.',true);});});
+  // The fallback AP has no UI on/off (disabling it risks a lockout); a UI save
+  // always keeps it enabled. The API (/api/v1/provisioning/ap) still accepts
+  // enabled:false for advanced/programmatic use.
+  $('dc-ap-save').addEventListener('click',function(){setupMessage('dc-ap-msg','Saving…');dcRequest('/api/v1/provisioning/ap',{ssid:$('dc-ap-ssid').value,password:$('dc-ap-password').value,ip:$('dc-ap-ip').value,enabled:true}).then(function(){setupMessage('dc-ap-msg','Saved. Rebooting…');}).catch(function(j){setupMessage('dc-ap-msg',j.error||'Could not save AP settings.',true);});});
   $('dc-load-logs').addEventListener('click',function(){dcFetchJson('/api/v1/system/logs',{cache:'no-store'}).then(function(j){$('dc-logs').textContent=(j.entries||[]).map(function(e){return '['+e.ms+' ms] '+e.text;}).join('\n');}).catch(function(){setupMessage('dc-system-msg','Could not load logs.',true);});});
   var sFwBtn=$('s-fw-update'); if(sFwBtn) sFwBtn.addEventListener('click',function(){openProvisioning();});
   $('dc-ota-upload').addEventListener('click',function(){var f=$('dc-ota-file').files[0];if(!f){setupMessage('dc-system-msg','Choose a firmware .bin first.',true);return;}otaUpload(f,false);});
