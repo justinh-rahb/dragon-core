@@ -130,7 +130,8 @@ static esp_err_t provisioning_get(httpd_req_t *req)
         char ip[INET_ADDRSTRLEN] = {0};
         inet_ntoa_r(addr, ip, sizeof(ip));
         cJSON_AddStringToObject(obj, "ip", ip);
-        cJSON_AddBoolToObject(obj, "enabled", ap.enabled);
+        // Tri-state lifecycle: "always" / "temp" (15 min after boot) / "off".
+        cJSON_AddStringToObject(obj, "ap_mode", dc_wifi_ap_mode_to_str(ap.mode));
     }
 
     if (s_config.describe_product) {
@@ -201,7 +202,7 @@ static esp_err_t ap_post(httpd_req_t *req)
     cJSON *ssid = cJSON_GetObjectItemCaseSensitive(body, "ssid");
     cJSON *password = cJSON_GetObjectItemCaseSensitive(body, "password");
     cJSON *ip = cJSON_GetObjectItemCaseSensitive(body, "ip");
-    cJSON *enabled = cJSON_GetObjectItemCaseSensitive(body, "enabled");
+    cJSON *ap_mode = cJSON_GetObjectItemCaseSensitive(body, "ap_mode");
     if ((ssid && !cJSON_IsString(ssid)) || (password && !cJSON_IsString(password))) {
         cJSON_Delete(body);
         return json_error(req, "400 Bad Request", "AP SSID and password must be strings");
@@ -224,7 +225,12 @@ static esp_err_t ap_post(httpd_req_t *req)
         cJSON_Delete(body);
         return json_error(req, "400 Bad Request", "invalid AP IPv4 address");
     }
-    config.enabled = cJSON_IsBool(enabled) ? cJSON_IsTrue(enabled) : true;
+    // Preserve the current mode if the field is absent/invalid (the form may only
+    // be changing SSID/IP). "off" is accepted here even though the UI hides it.
+    dc_wifi_ap_config_t cur = {0};
+    dc_wifi_get_ap_config(&cur);
+    config.mode = dc_wifi_ap_mode_from_str(
+        cJSON_IsString(ap_mode) ? ap_mode->valuestring : NULL, cur.mode);
     cJSON_Delete(body);
     cJSON *reply = cJSON_CreateObject();
     cJSON_AddBoolToObject(reply, "ok", true);

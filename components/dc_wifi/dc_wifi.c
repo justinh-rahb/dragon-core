@@ -5,6 +5,7 @@
 #include "esp_mac.h"
 #include "esp_netif.h"
 #include "esp_system.h"
+#include "esp_timer.h"
 #include "esp_wifi.h"
 #include "dhcpserver/dhcpserver.h"
 #include "dhcpserver/dhcpserver_options.h"
@@ -28,7 +29,8 @@ static const char *TAG = "dc_wifi";
 #define KEY_AP_SSID "ap_ssid"
 #define KEY_AP_PASS "ap_pass"
 #define KEY_AP_IP   "ap_ip"
-#define KEY_AP_EN   "ap_enabled"
+#define KEY_AP_EN   "ap_enabled"   // legacy bool, migrated to KEY_AP_MODE
+#define KEY_AP_MODE "ap_mode"      // u8 dc_wifi_ap_mode_t
 
 #define STA_MAX_RETRIES  5
 #define BIT_CONNECTED    BIT0
@@ -40,6 +42,7 @@ static dc_wifi_state_t s_state = DC_WIFI_STATE_INIT;
 static EventGroupHandle_t s_events = NULL;
 static esp_netif_t *s_sta_netif = NULL;
 static esp_netif_t *s_ap_netif = NULL;
+static esp_timer_handle_t s_ap_temp_timer = NULL;   // TEMP-mode AP shutdown
 static int s_retry = 0;
 static bool s_mdns_started = false;
 static char s_hostname[33] = DC_WIFI_DEFAULT_HOSTNAME;
@@ -229,6 +232,19 @@ static void build_default_ap_ssid(char *out, size_t out_sz)
 
 // Populate `out` with the effective AP config: NVS values if set, defaults
 // otherwise (MAC-derived SSID, hardcoded password, 192.168.4.1).
+// Read the AP mode, migrating the legacy KEY_AP_EN bool if the new key is absent:
+// on -> the default (always on), off -> OFF.
+static dc_wifi_ap_mode_t load_ap_mode(nvs_handle_t h)
+{
+    uint8_t m;
+    if (nvs_get_u8(h, KEY_AP_MODE, &m) == ESP_OK)
+        return m <= DC_WIFI_AP_TEMP ? (dc_wifi_ap_mode_t)m : DC_WIFI_AP_MODE_DEFAULT;
+    uint8_t en;
+    if (nvs_get_u8(h, KEY_AP_EN, &en) == ESP_OK)
+        return en ? DC_WIFI_AP_MODE_DEFAULT : DC_WIFI_AP_OFF;
+    return DC_WIFI_AP_MODE_DEFAULT;
+}
+
 static void load_ap_config(dc_wifi_ap_config_t *out)
 {
     memset(out, 0, sizeof(*out));
@@ -247,13 +263,11 @@ static void load_ap_config(dc_wifi_ap_config_t *out)
         uint32_t ip = 0;
         if (nvs_get_u32(h, KEY_AP_IP, &ip) != ESP_OK || ip == 0) ip = DEFAULT_AP_IP;
         out->ip = ip;
-        uint8_t en = 1;
-        if (nvs_get_u8(h, KEY_AP_EN, &en) != ESP_OK) en = 1;   // default on
-        out->enabled = (en != 0);
+        out->mode = load_ap_mode(h);
         nvs_close(h);
     } else {
         out->ip = DEFAULT_AP_IP;
-        out->enabled = true;
+        out->mode = DC_WIFI_AP_MODE_DEFAULT;
     }
 }
 
@@ -287,6 +301,34 @@ static esp_err_t apply_ap_ip(uint32_t ip_host_order)
     return ESP_OK;
 }
 
+// Fill an AP wifi_config_t from our stored config (shared by the setup-portal
+// path and the concurrent AP+STA path).
+static void fill_ap_wifi_config(wifi_config_t *ap, const dc_wifi_ap_config_t *cfg)
+{
+    memset(ap, 0, sizeof(*ap));
+    size_t ssid_len = strlen(cfg->ssid);
+    size_t password_len = strlen(cfg->password);
+    memcpy(ap->ap.ssid, cfg->ssid, ssid_len);
+    memcpy(ap->ap.password, cfg->password, password_len);
+    ap->ap.ssid_len       = ssid_len;
+    ap->ap.channel        = 1;
+    ap->ap.max_connection = 4;
+    // Open network is legal too, but WPA2 requires ≥ 8 chars for the password.
+    ap->ap.authmode = password_len >= 8 ? WIFI_AUTH_WPA2_PSK : WIFI_AUTH_OPEN;
+}
+
+static void log_ap_up(const dc_wifi_ap_config_t *cfg)
+{
+    // uint32_t is 'long unsigned' under IDF 5.3's toolchain — cast per octet
+    // so %u picks up plain unsigned int.
+    ESP_LOGI(TAG, "AP SSID=%s ip=%u.%u.%u.%u",
+             cfg->ssid,
+             (unsigned)((cfg->ip >> 24) & 0xFF),
+             (unsigned)((cfg->ip >> 16) & 0xFF),
+             (unsigned)((cfg->ip >>  8) & 0xFF),
+             (unsigned)( cfg->ip        & 0xFF));
+}
+
 static void start_ap_mode(void)
 {
     ESP_LOGI(TAG, "starting AP + captive portal");
@@ -299,17 +341,8 @@ static void start_ap_mode(void)
     load_ap_config(&cfg);
     apply_ap_ip(cfg.ip);
 
-    wifi_config_t ap = {0};
-    size_t ssid_len = strlen(cfg.ssid);
-    size_t password_len = strlen(cfg.password);
-    memcpy(ap.ap.ssid, cfg.ssid, ssid_len);
-    memcpy(ap.ap.password, cfg.password, password_len);
-    ap.ap.ssid_len       = ssid_len;
-    ap.ap.channel        = 1;
-    ap.ap.max_connection = 4;
-    // Open network is legal too, but WPA2 requires ≥ 8 chars for the password.
-    ap.ap.authmode = strlen(cfg.password) >= 8 ? WIFI_AUTH_WPA2_PSK
-                                               : WIFI_AUTH_OPEN;
+    wifi_config_t ap;
+    fill_ap_wifi_config(&ap, &cfg);
 
     // APSTA so dc_wifi_scan_start() can enumerate networks without dropping
     // the portal AP off the air.
@@ -318,15 +351,36 @@ static void start_ap_mode(void)
     ESP_ERROR_CHECK(esp_wifi_start());
 
     s_state = DC_WIFI_STATE_AP_PORTAL;
-    // uint32_t is 'long unsigned' under IDF 5.3's toolchain — cast per octet
-    // so %u picks up plain unsigned int.
-    ESP_LOGI(TAG, "AP SSID=%s ip=%u.%u.%u.%u",
-             cfg.ssid,
-             (unsigned)((cfg.ip >> 24) & 0xFF),
-             (unsigned)((cfg.ip >> 16) & 0xFF),
-             (unsigned)((cfg.ip >>  8) & 0xFF),
-             (unsigned)( cfg.ip        & 0xFF));
+    log_ap_up(&cfg);
     // Portal is started by app_main after dc_wifi_start returns.
+}
+
+// TEMP-mode timeout: close the concurrent AP once the recovery window elapses —
+// but only if STA is actually up. If STA never connected, the AP is the only way
+// in, so keep it (the boot path has already made it the AP_PORTAL).
+static void ap_temp_timeout_cb(void *arg)
+{
+    (void)arg;
+    if (s_state == DC_WIFI_STATE_STA_CONNECTED) {
+        ESP_LOGI(TAG, "temp AP window (%d min) elapsed; dropping AP, STA-only now",
+                 DC_WIFI_AP_TEMP_MINUTES);
+        esp_wifi_set_mode(WIFI_MODE_STA);
+    } else {
+        ESP_LOGW(TAG, "temp AP window elapsed but STA not connected; keeping AP up "
+                      "as the recovery portal");
+    }
+}
+
+static void schedule_ap_temp_shutdown(void)
+{
+    const esp_timer_create_args_t args = { .callback = ap_temp_timeout_cb,
+                                           .name = "ap_temp" };
+    if (s_ap_temp_timer == NULL && esp_timer_create(&args, &s_ap_temp_timer) != ESP_OK) {
+        ESP_LOGW(TAG, "could not create temp-AP timer; AP will stay up");
+        return;
+    }
+    esp_timer_start_once(s_ap_temp_timer,
+                         (uint64_t)DC_WIFI_AP_TEMP_MINUTES * 60ULL * 1000000ULL);
 }
 
 // ---------- STA mode ----------
@@ -344,6 +398,31 @@ static void start_sta_mode(const char *ssid, const char *pass)
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &sta));
     s_state = DC_WIFI_STATE_STA_CONNECTING;
     ESP_ERROR_CHECK(esp_wifi_start());
+}
+
+// Bring up STA and the AP together (APSTA) for AP modes ALWAYS/TEMP when STA
+// credentials exist. s_state tracks the STA so the portal keeps requiring auth;
+// the AP's WPA2 password is its own access gate.
+static void start_sta_ap_mode(const char *ssid, const char *pass,
+                              const dc_wifi_ap_config_t *ap_cfg)
+{
+    ESP_LOGI(TAG, "connecting to %s with concurrent AP %s", ssid, ap_cfg->ssid);
+    snprintf(s_sta_ssid, sizeof s_sta_ssid, "%s", ssid);
+    apply_ap_ip(ap_cfg->ip);
+
+    wifi_config_t sta = {0};
+    memcpy(sta.sta.ssid, ssid, strlen(ssid));
+    memcpy(sta.sta.password, pass, strlen(pass));
+
+    wifi_config_t ap;
+    fill_ap_wifi_config(&ap, ap_cfg);
+
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &sta));
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap));
+    s_state = DC_WIFI_STATE_STA_CONNECTING;
+    ESP_ERROR_CHECK(esp_wifi_start());
+    log_ap_up(ap_cfg);
 }
 
 // ---------- Event handlers ----------
@@ -508,25 +587,34 @@ esp_err_t dc_wifi_start(void)
     char ssid[33] = {0};
     char pass[65] = {0};
     if (load_saved_creds(ssid, sizeof(ssid), pass, sizeof(pass))) {
-        start_sta_mode(ssid, pass);
+        dc_wifi_ap_config_t ap_cfg;
+        load_ap_config(&ap_cfg);
+
+        // OFF => STA only; ALWAYS/TEMP => STA with a concurrent AP for reach/recovery.
+        if (ap_cfg.mode == DC_WIFI_AP_OFF) start_sta_mode(ssid, pass);
+        else                               start_sta_ap_mode(ssid, pass, &ap_cfg);
+
         // Wait for a decision. STA_MAX_RETRIES * ~4 s each ≈ 20 s of real work,
         // plus a generous margin so a slow-associating AP still has room.
         EventBits_t bits = xEventGroupWaitBits(
             s_events, BIT_CONNECTED | BIT_FAILED, pdFALSE, pdFALSE,
             pdMS_TO_TICKS(30000));
-        if (!(bits & BIT_CONNECTED)) {
-            dc_wifi_ap_config_t ap_cfg;
-            load_ap_config(&ap_cfg);
-            if (ap_cfg.enabled) {
-                s_sta_failed = true;   // let the setup page explain why the join failed
-                ESP_LOGW(TAG, "STA never came up (bits=0x%x) — falling back to AP",
+        if (bits & BIT_CONNECTED) {
+            // STA up. TEMP closes the concurrent-AP window after the boot timer.
+            if (ap_cfg.mode == DC_WIFI_AP_TEMP) schedule_ap_temp_shutdown();
+        } else {
+            s_sta_failed = true;   // let the setup page explain why the join failed
+            if (ap_cfg.mode == DC_WIFI_AP_OFF) {
+                ESP_LOGW(TAG, "STA never came up (bits=0x%x); AP mode OFF — no portal "
+                              "(recover via USB --erase-nvs or the Power+Auto combo)",
                          (unsigned)bits);
-                start_ap_mode();
+                // Leave s_state == STA_CONNECTING; no AP was brought up.
             } else {
-                ESP_LOGW(TAG, "STA never came up; AP fallback is disabled — "
-                              "letting the driver keep retrying in the background");
-                // Leave s_state == STA_CONNECTING; the wifi driver will keep
-                // its own auto-reconnect running.
+                // The concurrent AP is already on air; promote it to the setup
+                // portal (no-auth + captive DNS) so the creds can be fixed.
+                ESP_LOGW(TAG, "STA never came up (bits=0x%x); the concurrent AP is the "
+                              "fallback portal", (unsigned)bits);
+                s_state = DC_WIFI_STATE_AP_PORTAL;
             }
         }
     } else {
@@ -612,6 +700,25 @@ int dc_wifi_get_scan_results(wifi_ap_record_t *out, int max_count)
 
 // ---------- AP config ----------
 
+const char *dc_wifi_ap_mode_to_str(dc_wifi_ap_mode_t mode)
+{
+    switch (mode) {
+    case DC_WIFI_AP_ALWAYS: return "always";
+    case DC_WIFI_AP_TEMP:   return "temp";
+    case DC_WIFI_AP_OFF:    return "off";
+    default:                return "always";
+    }
+}
+
+dc_wifi_ap_mode_t dc_wifi_ap_mode_from_str(const char *s, dc_wifi_ap_mode_t fallback)
+{
+    if (s == NULL) return fallback;
+    if (strcmp(s, "always") == 0) return DC_WIFI_AP_ALWAYS;
+    if (strcmp(s, "temp")   == 0) return DC_WIFI_AP_TEMP;
+    if (strcmp(s, "off")    == 0) return DC_WIFI_AP_OFF;
+    return fallback;
+}
+
 esp_err_t dc_wifi_get_ap_config(dc_wifi_ap_config_t *out)
 {
     if (out == NULL) return ESP_ERR_INVALID_ARG;
@@ -622,7 +729,8 @@ esp_err_t dc_wifi_get_ap_config(dc_wifi_ap_config_t *out)
 esp_err_t dc_wifi_set_ap_config_and_reboot(const dc_wifi_ap_config_t *cfg)
 {
     if (cfg == NULL || !dc_wifi_ssid_valid(cfg->ssid, true) ||
-        !dc_wifi_password_valid(cfg->password)) return ESP_ERR_INVALID_ARG;
+        !dc_wifi_password_valid(cfg->password) ||
+        cfg->mode > DC_WIFI_AP_TEMP) return ESP_ERR_INVALID_ARG;
 
     nvs_handle_t h;
     esp_err_t err = nvs_open(NVS_NS, NVS_READWRITE, &h);
@@ -634,7 +742,8 @@ esp_err_t dc_wifi_set_ap_config_and_reboot(const dc_wifi_ap_config_t *cfg)
     else                          nvs_set_str(h, KEY_AP_PASS, cfg->password);
     if (cfg->ip == 0) nvs_erase_key(h, KEY_AP_IP);
     else              nvs_set_u32(h, KEY_AP_IP, cfg->ip);
-    nvs_set_u8(h, KEY_AP_EN, cfg->enabled ? 1 : 0);
+    nvs_set_u8(h, KEY_AP_MODE, (uint8_t)cfg->mode);
+    nvs_erase_key(h, KEY_AP_EN);   // supersede the legacy bool
     err = nvs_commit(h);
     nvs_close(h);
     if (err != ESP_OK) return err;
