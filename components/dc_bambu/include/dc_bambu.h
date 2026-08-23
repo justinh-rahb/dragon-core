@@ -9,6 +9,7 @@
 // to the printer. UNTESTED against real hardware — for community validation (see
 // plans/control-source-bambu-ha.md).
 #include <stdbool.h>
+#include <stdint.h>
 #include "esp_err.h"
 
 typedef enum {
@@ -42,6 +43,7 @@ typedef struct {
     float bed_temp;       // bed_temper (°C); NaN until first report
     float bed_target;     // bed_target_temper (°C, the setpoint AUTO triggers on)
     float chamber_temp;   // chamber_temper (°C); NaN if the model has no sensor
+    uint32_t chamber_temp_age_ms; // age of last chamber sample; UINT32_MAX if unavailable
     char  filament[16];   // active filament type from AMS / ext spool (e.g. "PETG");
                           // "" if unknown. Feeds filament-based chamber zones.
     bool  printing;       // gcode_state is PREPARE/RUNNING/PAUSE (a print is active);

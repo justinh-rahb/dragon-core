@@ -44,6 +44,17 @@ static void expect_phase(const char *state, dc_bambu_gcode_phase_t want)
     printf("[%s] phase %-9s want=%d got=%d\n", ok ? "PASS" : "FAIL", state, want, got);
 }
 
+
+static void expect_chamber_fresh(const char *name, int64_t now_us,
+                                 int64_t sample_us, int want)
+{
+    int got = dc_bambu_chamber_sample_fresh(now_us, sample_us);
+    int ok = got == want;
+    if (!ok) fails++;
+    printf("[%s] chamber-fresh %-18s want=%d got=%d\n",
+           ok ? "PASS" : "FAIL", name, want, got);
+}
+
 int main(void)
 {
     // --- active-filament tri-state ---
@@ -116,6 +127,18 @@ int main(void)
                    cases[i].fil, cases[i].want, got);
         }
     }
+
+
+    // --- chamber-temperature freshness ---
+    // Never-received samples are unavailable; the timeout boundary itself is
+    // still fresh, and the first microsecond beyond it is stale. A backwards
+    // monotonic-clock delta is clamped to age zero by the helper.
+    expect_chamber_fresh("never received", 1000000LL, 0, 0);
+    expect_chamber_fresh("fresh sample", 1000000LL, 999999LL, 1);
+    expect_chamber_fresh("14.999999 s", 16000000LL, 1000001LL, 1);
+    expect_chamber_fresh("exactly 15 s", 16000000LL, 1000000LL, 1);
+    expect_chamber_fresh("15 s + 1 us", 16000001LL, 1000000LL, 0);
+    expect_chamber_fresh("clock went back", 999999LL, 1000000LL, 1);
 
     // --- print-state classifier (preheat starts on PREPARE) ---
     expect_active("PREPARE", 1);
