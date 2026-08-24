@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 
 // Result of resolving the active filament from a report. The tri-state matters:
@@ -129,6 +130,21 @@ static inline int dc_bambu_zone_match(const char *filament, const char *const na
         }
     }
     return best;
+}
+
+
+// Chamber-temperature sample freshness. Keep this decision pure/host-testable so
+// dc_bambu_get_status() and its tests share the exact timeout boundary.
+// sample_us <= 0 means no chamber sample has ever been received. A backwards
+// clock delta is treated as age zero rather than spuriously stale.
+#define DC_BAMBU_CHAMBER_STALE_US 15000000LL
+
+static inline bool dc_bambu_chamber_sample_fresh(int64_t now_us, int64_t sample_us)
+{
+    if (sample_us <= 0) return false;
+    int64_t age_us = now_us - sample_us;
+    if (age_us < 0) age_us = 0;
+    return age_us <= DC_BAMBU_CHAMBER_STALE_US;
 }
 
 // Is a Bambu gcode_state "active" for chamber-zone purposes? PREPARE (so the chamber

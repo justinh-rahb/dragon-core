@@ -13,6 +13,7 @@
 #include "dc_bambu_parse.h"
 
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "mqtt_client.h"
@@ -61,7 +62,8 @@ static const char PUSHALL[] =
 static SemaphoreHandle_t        s_lock  = NULL;
 static dc_bambu_config_t        s_cfg   = {0};
 static dc_bambu_status_t        s_status = {
-    .state = DC_BAMBU_DISABLED, .bed_temp = NAN, .bed_target = NAN, .chamber_temp = NAN, .progress = -1,
+    .state = DC_BAMBU_DISABLED, .bed_temp = NAN, .bed_target = NAN, .chamber_temp = NAN,
+    .chamber_temp_age_ms = UINT32_MAX, .progress = -1,
 };
 static esp_mqtt_client_handle_t s_client = NULL;
 
@@ -70,6 +72,7 @@ static char   s_request_topic[80] = {0};   // device/<serial>/request
 static char  *s_rx = NULL;                 // RX_CAP reassembly buffer
 static size_t s_rx_len = 0;
 static bool   s_in_report = false;         // current inbound msg is on the report topic
+static int64_t s_chamber_temp_us = 0;      // monotonic timestamp of last chamber_temper sample
 
 // ---------- NVS ----------
 
@@ -151,7 +154,11 @@ static void parse_report(const char *json)
         s_status.connected = true;
     }
     if (got_tgt)  s_status.bed_target = bedtgt;
-    if (got_cham) s_status.chamber_temp = cham;
+    if (got_cham) {
+        s_status.chamber_temp = cham;
+        s_chamber_temp_us = esp_timer_get_time();
+        s_status.chamber_temp_age_ms = 0;
+    }
     if (got_percent) s_status.progress = percent < 0 ? 0 : percent > 100 ? 1 : percent / 100.0f;
     if (got_gs) {
         s_status.printing = dc_bambu_gcode_active(gs);   // keep prior if a delta omits it
@@ -201,6 +208,9 @@ static void mqtt_event_handler(void *args, esp_event_base_t base, int32_t id, vo
         ESP_LOGI(TAG, "connected; subscribing %s", s_report_topic);
         xSemaphoreTake(s_lock, portMAX_DELAY);
         s_status.state = DC_BAMBU_CONNECTED;   // not SUBSCRIBED until first report
+        s_status.chamber_temp = NAN;
+        s_status.chamber_temp_age_ms = UINT32_MAX;
+        s_chamber_temp_us = 0;
         xSemaphoreGive(s_lock);
         esp_mqtt_client_subscribe(s_client, s_report_topic, 0);
         esp_mqtt_client_publish(s_client, s_request_topic, PUSHALL, 0, 0, 0);
@@ -210,6 +220,9 @@ static void mqtt_event_handler(void *args, esp_event_base_t base, int32_t id, vo
         xSemaphoreTake(s_lock, portMAX_DELAY);
         s_status.state     = DC_BAMBU_DISCONNECTED;
         s_status.connected = false;
+        s_status.chamber_temp = NAN;
+        s_status.chamber_temp_age_ms = UINT32_MAX;
+        s_chamber_temp_us = 0;
         xSemaphoreGive(s_lock);
         break;
 
@@ -338,7 +351,22 @@ esp_err_t dc_bambu_get_status(dc_bambu_status_t *out)
     if (out == NULL) return ESP_ERR_INVALID_ARG;
     if (s_lock) xSemaphoreTake(s_lock, portMAX_DELAY);
     *out = s_status;
+    int64_t sample_us = s_chamber_temp_us;
     if (s_lock) xSemaphoreGive(s_lock);
+
+    int64_t now_us = esp_timer_get_time();
+    if (sample_us <= 0 || !isfinite(out->chamber_temp)) {
+        out->chamber_temp = NAN;
+        out->chamber_temp_age_ms = UINT32_MAX;
+    } else {
+        int64_t age_us = now_us - sample_us;
+        if (age_us < 0) age_us = 0;
+        uint64_t age_ms = (uint64_t)age_us / 1000ULL;
+        out->chamber_temp_age_ms =
+            age_ms > UINT32_MAX ? UINT32_MAX : (uint32_t)age_ms;
+        if (!dc_bambu_chamber_sample_fresh(now_us, sample_us))
+            out->chamber_temp = NAN;
+    }
     return ESP_OK;
 }
 
