@@ -34,7 +34,16 @@ const char *dc_source_str(dc_ctl_source_t src)
     case DC_SRC_BAMBU:        return "bambu";
     case DC_SRC_HA:           return "ha";
     case DC_SRC_KLIPPER_MQTT: return "klipper-mqtt";
+    case DC_SRC_PRUSA:        return "prusa";
     case DC_SRC_NONE:         return "none";
     default:                  return "klipper";
+    }
+}
+
+bool dc_source_has_filament(dc_ctl_source_t src)
+{
+    switch (src) {
+    case DC_SRC_PRUSA: return false;   // PrusaLink reports no filament type -> bed-follow
+    default:           return true;    // Klipper/Bambu report filament -> zone profile
     }
 }
