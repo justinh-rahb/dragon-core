@@ -205,7 +205,7 @@ static void mqtt_event_handler(void *args, esp_event_base_t base, int32_t id, vo
     esp_mqtt_event_handle_t e = (esp_mqtt_event_handle_t)data;
     switch ((esp_mqtt_event_id_t)id) {
     case MQTT_EVENT_CONNECTED:
-        ESP_LOGI(TAG, "connected; subscribing %s", s_report_topic);
+        ESP_LOGI(TAG, "connected; subscribing to Bambu report topic");
         xSemaphoreTake(s_lock, portMAX_DELAY);
         s_status.state = DC_BAMBU_CONNECTED;   // not SUBSCRIBED until first report
         s_status.chamber_temp = NAN;
@@ -309,7 +309,7 @@ esp_err_t dc_bambu_start(void)
         return err;
     }
     s_status.state = DC_BAMBU_CONNECTING;
-    ESP_LOGI(TAG, "connecting to %s (serial %s)", uri, s_cfg.serial);
+    ESP_LOGI(TAG, "connecting to %s", uri);
     return ESP_OK;
 }
 
