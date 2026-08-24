@@ -95,25 +95,37 @@ static char s_resp[RESP_MAX];
 // only if the body was valid PrusaLink JSON carrying a printer object — so a wrong
 // host that answers 200 with non-JSON (e.g. another web UI's HTML) fails to OFFLINE
 // rather than masquerading as a connected printer.
+// Parse one /api/v1/status body into s_status. STRICT + ATOMIC: a valid live sample
+// must carry printer.temp_bed AND printer.target_bed as finite numbers AND a non-empty
+// printer.state string. Anything short of that (a partial body, a non-numeric field, a
+// printer object missing target_bed) returns false so the caller fails to OFFLINE — it
+// must NEVER leave a stale bed_target in place and keep the chamber heating. The whole
+// sample is staged in locals and committed under the lock in one shot (no partial write).
 static bool parse_status(const char *json)
 {
     cJSON *root = cJSON_Parse(json);
     if (!root) return false;
-    bool ok = false;
+
+    float bed_temp = NAN, bed_target = NAN;
+    const char *state = NULL;
     cJSON *pr = cJSON_GetObjectItemCaseSensitive(root, "printer");
     if (cJSON_IsObject(pr)) {
         cJSON *tb = cJSON_GetObjectItemCaseSensitive(pr, "temp_bed");
         cJSON *gb = cJSON_GetObjectItemCaseSensitive(pr, "target_bed");
         cJSON *st = cJSON_GetObjectItemCaseSensitive(pr, "state");
+        if (cJSON_IsNumber(tb)) bed_temp = (float)tb->valuedouble;
+        if (cJSON_IsNumber(gb)) bed_target = (float)gb->valuedouble;
+        if (cJSON_IsString(st)) state = st->valuestring;
+    }
+
+    bool ok = isfinite(bed_temp) && isfinite(bed_target) && state && state[0];
+    if (ok) {
         xSemaphoreTake(s_lock, portMAX_DELAY);
-        if (cJSON_IsNumber(tb)) s_status.bed_temp = (float)tb->valuedouble;
-        if (cJSON_IsNumber(gb)) s_status.bed_target = (float)gb->valuedouble;
-        if (cJSON_IsString(st) && st->valuestring) {
-            strncpy(s_status.printer_state, st->valuestring, sizeof(s_status.printer_state) - 1);
-            s_status.printer_state[sizeof(s_status.printer_state) - 1] = '\0';
-        }
+        s_status.bed_temp = bed_temp;
+        s_status.bed_target = bed_target;
+        strncpy(s_status.printer_state, state, sizeof(s_status.printer_state) - 1);
+        s_status.printer_state[sizeof(s_status.printer_state) - 1] = '\0';
         xSemaphoreGive(s_lock);
-        ok = true;
     }
     cJSON_Delete(root);
     return ok;
