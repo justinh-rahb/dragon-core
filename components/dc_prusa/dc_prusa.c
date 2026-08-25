@@ -266,27 +266,7 @@ esp_err_t dc_prusa_get_status(dc_prusa_status_t *out)
         xSemaphoreGive(s_lock);
     }
 
-    int64_t now_us = esp_timer_get_time();
-    if (sample_us <= 0) {
-        out->status_age_ms = UINT32_MAX;
-    } else {
-        int64_t age_us = now_us - sample_us;
-        if (age_us < 0) age_us = 0;
-        uint64_t age_ms = (uint64_t)age_us / 1000ULL;
-        out->status_age_ms = age_ms > UINT32_MAX ? UINT32_MAX : (uint32_t)age_ms;
-    }
-
-    // A wedged poll task must not leave a once-online snapshot actionable forever.
-    // Preserve explicit DISABLED/AUTH_FAILED states for diagnosis, but expire all
-    // printer values and make a stale ONLINE/CONNECTING snapshot report OFFLINE.
-    if (!dc_prusa_status_sample_fresh(now_us, sample_us)) {
-        if (out->state == DC_PRUSA_ONLINE || out->state == DC_PRUSA_CONNECTING)
-            out->state = DC_PRUSA_OFFLINE;
-        out->online = false;
-        out->bed_temp = NAN;
-        out->bed_target = 0.0f;
-        out->printer_state[0] = '\0';
-    }
+    dc_prusa_status_apply_freshness(out, esp_timer_get_time(), sample_us);
     return ESP_OK;
 }
 
