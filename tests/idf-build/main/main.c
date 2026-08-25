@@ -4,6 +4,7 @@
 #include "dc_moonraker.h"
 #include "dc_mqtt.h"
 #include "dc_portal.h"
+#include "dc_prusa.h"
 #include "dc_source.h"
 #include "dc_ui.h"
 #include "dc_wifi.h"
@@ -18,6 +19,8 @@ void app_main(void)
     dc_mqtt_config_t mqtt_config = {0};
     dc_bambu_config_t bambu_config = {0};
     dc_moonraker_config_t moonraker_config = {0};
+    dc_prusa_config_t prusa_config = {0};
+    dc_prusa_status_t prusa_status = {0};
     dc_lighting_output_t lighting_output = {0};
     dc_lighting_stats_t lighting_stats = {0};
     // Config APIs are deliberately valid before either client is started. Shared
@@ -26,6 +29,9 @@ void app_main(void)
     (void)dc_bambu_set_config(&bambu_config);
     (void)dc_moonraker_get_config(&moonraker_config);
     (void)dc_moonraker_set_config(&moonraker_config);
+    (void)dc_prusa_get_config(&prusa_config);
+    (void)dc_prusa_set_config(&prusa_config);
+    (void)dc_prusa_get_status(&prusa_status);
     (void)dc_mqtt_start(&mqtt_config, &mqtt);
     (void)dc_mqtt_destroy(mqtt);
     (void)dc_lighting_start(&(dc_lighting_config_t){ .outputs = &lighting_output });
