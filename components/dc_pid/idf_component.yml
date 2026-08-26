@@ -1,4 +1,5 @@
-idf_component_register(
-    SRCS "dc_pid.c"
-    INCLUDE_DIRS "include"
-)
+version: "0.1.0"
+description: Generic actuator-agnostic PID control primitive for Dragon firmware
+license: MIT
+dependencies:
+  idf: ">=5.3"
