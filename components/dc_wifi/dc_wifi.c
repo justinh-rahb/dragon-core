@@ -47,7 +47,7 @@ static esp_netif_t *s_sta_netif = NULL;
 static esp_netif_t *s_ap_netif = NULL;
 static esp_timer_handle_t s_ap_temp_timer = NULL;   // TEMP-mode AP shutdown
 static esp_timer_handle_t s_no_ip_timer   = NULL;   // "associated but no DHCP IP" watchdog
-#define NO_IP_TIMEOUT_US  (8ULL * 1000000ULL)       // 8s to get a DHCP lease after associating
+#define NO_IP_TIMEOUT_US  (5ULL * 1000000ULL)       // 5s to get a DHCP lease, else drop & re-scan
 static int s_retry = 0;
 static bool s_mdns_started = false;
 static char s_hostname[33] = DC_WIFI_DEFAULT_HOSTNAME;
@@ -648,11 +648,12 @@ esp_err_t dc_wifi_start(void)
         else
             start_sta_ap_mode(ssid, pass, &ap_cfg);
 
-        // Wait for a decision. STA_MAX_RETRIES * ~4 s each ≈ 20 s of real work,
-        // plus a generous margin so a slow-associating AP still has room.
+        // Wait for a decision. With the ~5s no-IP watchdog cycling nodes, 45 s
+        // gives the STA ~7 association+DHCP attempts before we fall back to the
+        // portal — room to get past a mesh node that only leases intermittently.
         EventBits_t bits = xEventGroupWaitBits(
             s_events, BIT_CONNECTED | BIT_FAILED, pdFALSE, pdFALSE,
-            pdMS_TO_TICKS(30000));
+            pdMS_TO_TICKS(45000));
         if (bits & BIT_CONNECTED) {
             // STA up. TEMP closes the concurrent-AP window after the boot timer.
             if (ap_cfg.mode == DC_WIFI_AP_TEMP) schedule_ap_temp_shutdown();
