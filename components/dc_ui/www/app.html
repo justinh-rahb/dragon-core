@@ -543,6 +543,66 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
 .status-card h3{ margin-top:0; }
 .status-card .set-note{ margin-bottom:0; }
 @container (max-width:520px){ .status-hero,.status-grid{ grid-template-columns:1fr; } .status-orb{ width:112px; } }
+/* ---- DragonWheeze product surface. Yellow identifies the SH01 filament dryer
+   (distinct from Breath blue, Vent teal, Status orange). Vent/Status home
+   composition — hero beside a detail panel, full-width action row underneath —
+   with Breath-style quick-preset buttons. Its own DOM subtree keeps the other
+   products' IDs stable. ---- */
+.wheeze-app{
+  --primary: light-dark(rgb(202 138 4), rgb(250 204 21));
+  --ring: light-dark(rgb(202 138 4), rgb(250 204 21 / 78%));
+  --viz-series-1: var(--primary);
+  --viz-series-2: light-dark(rgb(34 197 94), rgb(74 222 128));
+}
+.wheeze-main{ min-width:0; min-height:0; overflow:auto; padding:12px;
+  display:flex; flex-direction:column; gap:10px; }
+.wheeze-tab[data-wheeze-page="settings"]{ margin-top:auto; }
+.wheeze-main .app-version{ margin-top:auto; }
+.wheeze-view{ display:none; }
+.wheeze-main[data-wheeze-page="home"] [data-wheeze-content="home"]{ display:flex; }
+.wheeze-main[data-wheeze-page="profiles"] [data-wheeze-content="profiles"]{ display:flex; }
+.wheeze-home{ flex-direction:column; gap:10px; }
+.wheeze-profiles{ flex-direction:column; gap:10px; max-width:560px; width:100%; }
+.wheeze-prow{ display:grid; grid-template-columns:minmax(0,1fr) 84px 84px; gap:8px; align-items:center; margin-bottom:8px; }
+.wheeze-prow input, .wheeze-prow select{ min-height:38px; width:100%; }
+.wheeze-plabels{ display:grid; grid-template-columns:minmax(0,1fr) 84px 84px; gap:8px;
+  color:var(--muted-foreground); font-size:11px; font-weight:600; text-transform:uppercase; margin-bottom:4px; }
+.wheeze-grid{ min-height:0; display:grid; grid-template-columns:minmax(0,1.15fr) minmax(190px,.85fr);
+  grid-template-rows:minmax(180px,1fr) auto; gap:10px; }
+.wheeze-hero{ display:flex; align-items:center; gap:18px; }
+.wheeze-visual{ position:relative; width:min(38%,150px); min-width:105px; aspect-ratio:1;
+  display:grid; place-items:center; border-radius:50%; color:var(--primary);
+  background:radial-gradient(circle, color-mix(in srgb,var(--primary) 20%,transparent) 0 46%, transparent 47%);
+  border:1px solid color-mix(in srgb,var(--primary) 32%,var(--border));
+  transition:border-color .35s ease, background .35s ease; }
+.wheeze-app[data-heat="1"] .wheeze-visual{ animation:wheeze-pulse 1.8s ease-in-out infinite;
+  border-color:color-mix(in srgb,var(--primary) 60%,var(--border)); }
+@keyframes wheeze-pulse{ 0%,100%{ box-shadow:0 0 0 0 color-mix(in srgb,var(--primary) 35%,transparent); }
+  50%{ box-shadow:0 0 0 8px color-mix(in srgb,var(--primary) 0%,transparent); } }
+.wheeze-mark{ position:relative; z-index:1; text-align:center; }
+.wheeze-mark strong{ display:block; font-size:26px; line-height:1; }
+.wheeze-mark span{ color:var(--muted-foreground); font-size:10px; text-transform:uppercase; letter-spacing:.06em; }
+.wheeze-copy{ min-width:0; }
+.wheeze-copy h2{ margin:0 0 5px; font-size:28px; line-height:1; }
+.wheeze-copy p{ margin:0; color:var(--muted-foreground); font-size:12px; }
+.wheeze-chip{ display:inline-flex; align-items:center; gap:5px; margin-top:12px; padding:4px 8px;
+  border-radius:var(--radius-full); color:var(--primary);
+  background:color-mix(in srgb,var(--primary) 14%,transparent); font-size:11px; font-weight:600; }
+.wheeze-chip::before{ content:""; width:7px; height:7px; border-radius:50%; background:currentColor; }
+.wheeze-status{ display:flex; flex-direction:column; gap:8px; }
+.wheeze-status h3{ margin-top:0; }
+.wheeze-status .status-detail{ margin-top:0; }
+.wheeze-heat{ display:inline-flex; align-items:center; gap:6px; font-weight:600; color:var(--muted-foreground); }
+.wheeze-heat::before{ content:""; width:9px; height:9px; border-radius:50%;
+  background:var(--muted-foreground); transition:background .3s ease; }
+.wheeze-app[data-heat="1"] .wheeze-heat{ color:var(--primary); }
+.wheeze-app[data-heat="1"] .wheeze-heat::before{ background:var(--primary); box-shadow:0 0 8px var(--primary); }
+.wheeze-wide{ grid-column:1/-1; display:flex; flex-direction:column; gap:10px; }
+.wheeze-wide h3{ margin-top:0; }
+.wheeze-actions{ display:grid; grid-template-columns:repeat(4,1fr); gap:8px; }
+.wheeze-run{ display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+.wheeze-actions .btn, .wheeze-run .btn{ min-height:44px; }
+@container (max-width:520px){ .wheeze-grid{ grid-template-columns:1fr; } .wheeze-visual{ width:112px; } }
 .provision-overlay{ position:fixed; inset:0; z-index:20; overflow:auto; padding:18px;
   background:var(--background); }
 .provision-shell{ width:min(680px,100%); margin:0 auto; display:flex; flex-direction:column; gap:10px; }
@@ -1228,6 +1288,66 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
   </div>
 </div>
 
+<div class="app wheeze-app" id="dw-app" data-online="0" data-heat="0" hidden>
+  <div class="shell">
+    <nav class="rail" aria-label="DragonWheeze navigation">
+      <div class="connection" aria-label="Connection"><i class="dot"></i><span id="dw-conn">Connecting…</span></div>
+      <button class="tab wheeze-tab" type="button" data-wheeze-page="home" aria-selected="true" aria-label="Dryer"><svg class="icon"><use href="#i-house"/></svg></button>
+      <button class="tab wheeze-tab" type="button" data-wheeze-page="profiles" aria-selected="false" aria-label="Drying profiles"><svg class="icon"><use href="#i-wind"/></svg></button>
+      <a class="tab wheeze-tab" data-wheeze-page="settings" href="#setup" data-open-provisioning aria-label="Device setup"><svg class="icon"><use href="#i-settings"/></svg></a>
+    </nav>
+    <main class="wheeze-main" id="dw-main" data-wheeze-page="home">
+      <section class="wheeze-view wheeze-home" data-wheeze-content="home">
+        <div class="wheeze-grid">
+          <article class="card wheeze-hero">
+            <div class="wheeze-visual" aria-hidden="true"><div class="wheeze-mark"><strong id="dw-temp">--</strong><span>°C target</span></div></div>
+            <div class="wheeze-copy">
+              <h2 id="dw-headline">DragonWheeze</h2>
+              <p id="dw-summary">Connecting to dryer…</p>
+              <span class="wheeze-chip" id="dw-profile">--</span>
+            </div>
+          </article>
+          <article class="card wheeze-status">
+            <h3>Status</h3>
+            <dl class="status-detail">
+              <div><dt>Heat</dt><dd><span class="wheeze-heat" id="dw-heat">--</span></dd></div>
+              <div><dt>Ambient</dt><dd id="dw-ambient">--</dd></div>
+              <div><dt>Humidity</dt><dd id="dw-humidity">--</dd></div>
+              <div><dt>Remaining</dt><dd id="dw-remaining">--</dd></div>
+              <div><dt>Wi-Fi</dt><dd id="dw-wifi">--</dd></div>
+            </dl>
+          </article>
+          <section class="card wheeze-wide">
+            <h3>Drying profile</h3>
+            <div class="wheeze-actions">
+              <button class="btn" type="button" data-wheeze-profile="0">—</button>
+              <button class="btn" type="button" data-wheeze-profile="1">—</button>
+              <button class="btn" type="button" data-wheeze-profile="2">—</button>
+              <button class="btn" type="button" data-wheeze-profile="3">—</button>
+            </div>
+            <div class="wheeze-run">
+              <button class="btn" type="button" id="dw-power"><svg class="icon"><use href="#i-power"/></svg> Power</button>
+              <button class="btn btn-primary" type="button" id="dw-start"><svg class="icon"><use href="#i-play"/></svg> Start</button>
+              <button class="btn btn-danger" type="button" id="dw-stop"><svg class="icon"><use href="#i-square"/></svg> Stop</button>
+            </div>
+            <div class="mode-feedback" id="dw-msg" role="status" aria-live="polite"></div>
+          </section>
+        </div>
+      </section>
+      <section class="wheeze-view wheeze-profiles" data-wheeze-content="profiles">
+        <article class="card">
+          <h3>Drying profiles</h3>
+          <p class="set-note">Name each profile and set its temperature and time. The Sovol SH01 supports <strong>40 / 45 / 50 °C</strong> and <strong>6–12 h</strong>. These are the four quick buttons on the dashboard.</p>
+          <div id="dw-profile-rows"></div>
+          <button class="btn btn-primary btn-block" type="button" id="dw-profiles-save"><svg class="icon"><use href="#i-wind"/></svg> Save profiles</button>
+          <div class="mode-feedback" id="dw-profiles-msg" role="status" aria-live="polite"></div>
+        </article>
+      </section>
+      <div class="app-version">DragonWheeze <span id="dw-footer-version">—</span></div>
+    </main>
+  </div>
+</div>
+
 <section class="provision-overlay" id="dc-provisioning" hidden aria-label="Device setup">
   <div class="provision-shell">
     <div class="provision-head"><div><strong id="dc-setup-title">Device setup</strong><div class="set-note" id="dc-setup-mode"></div></div>
@@ -1270,6 +1390,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
   var app = document.querySelector('.app');
   var ventApp = document.getElementById('dv-app');
   var statusApp = document.getElementById('ds-app');
+  var wheezeApp = document.getElementById('dw-app');
   var ventWasCalibrating = false;
   var product = 'dragonbreath';
   var $ = function(id){ return document.getElementById(id); };
@@ -1544,6 +1665,17 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
       document.title=ui.display_name||'DragonStatus';
       u('ds-version', i.firmware||'—');
       u('ds-footer-version', i.firmware||'—');
+      return;
+    }
+    if(ui.product==='dragonwheeze'){
+      product='dragonwheeze';
+      app.hidden=true;
+      ventApp.hidden=true;
+      statusApp.hidden=true;
+      wheezeApp.hidden=false;
+      wheezeApp.setAttribute('data-online','0');
+      document.title=ui.display_name||'DragonWheeze';
+      u('dw-footer-version', i.firmware||'—');
       return;
     }
     var title=$('dc-product-title');
@@ -1984,7 +2116,128 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     e.textContent=msg||''; e.className='mode-feedback'+(klass?' '+klass:'');
   }
 
+  function wheezeSetConn(ok){
+    wheezeApp.setAttribute('data-online', ok?'1':'0');
+    u('dw-conn', ok?'Connected':'Connecting…');
+  }
+  function wheezeFlash(msg,klass){
+    var e=$('dw-msg'); if(!e) return;
+    e.textContent=msg||''; e.className='mode-feedback'+(klass?' '+klass:'');
+  }
+  function wheezeDur(sec){
+    sec=Math.max(0, Math.round(sec||0));
+    var h=Math.floor(sec/3600), m=Math.floor((sec%3600)/60);
+    return h? (h+'h '+m+'m') : (m+'m');
+  }
+  function applyWheeze(s){
+    if(!s || s.api_version!==2 || !s.wheeze) return;
+    if(product!=='dragonwheeze'){
+      applyDeviceInfo({firmware:s.firmware, device_id:s.device_id,
+        ui:{schema:1,product:'dragonwheeze',display_name:'DragonWheeze'}});
+    }
+    var w=s.wheeze||{}, wifi=s.wifi||{};
+    var power=!!w.power, active=!!w.active, heating=!!w.heating;
+    wheezeApp.dataset.heat=heating?'1':'0';
+    // Left hero: the temperature it is drying at + the selected profile.
+    u('dw-temp', w.set_temperature_c==null?'--':String(Math.round(w.set_temperature_c)));
+    u('dw-profile', w.preset||w.preset_id||'--');
+    u('dw-headline', !power?'Dryer off':(active?'Drying':'Idle'));
+    u('dw-summary', !power?'Powered off. Press Power to wake the dryer.'
+      : active?('Running the '+(w.preset_id||'current')+' profile.')
+      : 'Powered on and idle. Pick a profile or press Start.');
+    // Right: current heat status + supporting readouts.
+    u('dw-heat', heating?'Heating':(power?'Standby':'Off'));
+    u('dw-ambient', w.ambient_temp_c==null?'--':Number(w.ambient_temp_c).toFixed(1)+' °C');
+    u('dw-humidity', w.ambient_humidity_rh==null?'--':Number(w.ambient_humidity_rh).toFixed(0)+' %');
+    u('dw-remaining', active?wheezeDur(w.remaining_sec):'--');
+    u('dw-wifi', (wifi.state||'unknown')+(wifi.ip?' · '+wifi.ip:''));
+    u('dw-footer-version', s.firmware||'—');
+    // Populate + highlight the dashboard profile buttons (load names once).
+    if(!wheezeProfiles.length) loadProfiles();
+    var pi=(w.profile_index==null?-1:Number(w.profile_index));
+    document.querySelectorAll('[data-wheeze-profile]').forEach(function(b){
+      b.setAttribute('aria-pressed', String(Number(b.dataset.wheezeProfile)===pi));
+    });
+    wheezeSetConn(true);
+  }
+  function wheezePost(body){
+    return fetch('/api/v2/command',{method:'POST',headers:hdr(),body:JSON.stringify(body)}).then(function(r){
+      return r.json().catch(function(){return {};}).then(function(j){
+        if(j.state) applyWheeze(j.state);
+        if(!r.ok) throw j;
+        return j;
+      });
+    });
+  }
+  function wheezeCommand(name,extra){
+    var command={name:name};
+    if(extra) for(var k in extra){ command[k]=extra[k]; }
+    return wheezePost({api_version:2,command:command});
+  }
+  /* ---- DragonWheeze editable drying profiles ---- */
+  var wheezeProfiles=[], wheezeAllowedTemps=[40,45,50], wheezeTimeMin=6, wheezeTimeMax=12;
+  function wheezeFlash2(msg,klass){ var e=$('dw-profiles-msg'); if(!e) return;
+    e.textContent=msg||''; e.className='mode-feedback'+(klass?' '+klass:''); }
+  function wheezeRenderButtons(){
+    document.querySelectorAll('[data-wheeze-profile]').forEach(function(b){
+      var p=wheezeProfiles[Number(b.dataset.wheezeProfile)];
+      b.textContent=p?p.name:'—';
+      b.title=p?(p.temp_c+' °C · '+p.time_hours+' h'):'';
+    });
+  }
+  function wheezeRenderProfileEditor(){
+    var host=$('dw-profile-rows'); if(!host) return;
+    var tempOpts=wheezeAllowedTemps.map(function(t){return '<option value="'+t+'">'+t+'</option>';}).join('');
+    var timeOpts=''; for(var h=wheezeTimeMin;h<=wheezeTimeMax;h++){ timeOpts+='<option value="'+h+'">'+h+'</option>'; }
+    host.innerHTML='<div class="wheeze-plabels"><span>Name / type</span><span>°C</span><span>Hours</span></div>';
+    wheezeProfiles.forEach(function(p){
+      var row=document.createElement('div'); row.className='wheeze-prow';
+      row.innerHTML='<input type="text" maxlength="15" class="wheeze-pname">'
+        +'<select class="wheeze-ptemp">'+tempOpts+'</select>'
+        +'<select class="wheeze-ptime">'+timeOpts+'</select>';
+      row.querySelector('.wheeze-pname').value=p.name||'';
+      row.querySelector('.wheeze-ptemp').value=String(p.temp_c);
+      row.querySelector('.wheeze-ptime').value=String(p.time_hours);
+      host.appendChild(row);
+    });
+  }
+  function loadProfiles(){
+    return fetch('/api/v2/profiles',{cache:'no-store'}).then(function(r){return r.json();}).then(function(d){
+      wheezeProfiles=d.profiles||[];
+      if(Array.isArray(d.allowed_temps)&&d.allowed_temps.length) wheezeAllowedTemps=d.allowed_temps;
+      if(d.time_min!=null) wheezeTimeMin=d.time_min;
+      if(d.time_max!=null) wheezeTimeMax=d.time_max;
+      wheezeRenderButtons(); wheezeRenderProfileEditor();
+      return wheezeProfiles;
+    }).catch(function(){});
+  }
+  function saveProfiles(){
+    var profiles=[];
+    document.querySelectorAll('#dw-profile-rows .wheeze-prow').forEach(function(r){
+      profiles.push({ name:r.querySelector('.wheeze-pname').value.trim(),
+        temp_c:Number(r.querySelector('.wheeze-ptemp').value),
+        time_hours:Number(r.querySelector('.wheeze-ptime').value) });
+    });
+    if(profiles.some(function(p){return !p.name;})){ wheezeFlash2('Every profile needs a name.','is-warn'); return; }
+    fetch('/api/v2/profiles',{method:'POST',headers:hdr(),body:JSON.stringify({profiles:profiles})}).then(function(r){
+      return r.json().catch(function(){return {};}).then(function(j){
+        if(!r.ok) throw j;
+        if(j.state) applyWheeze(j.state);
+        wheezeProfiles=profiles; wheezeRenderButtons();
+        wheezeFlash2('Profiles saved.','is-ok');
+      });
+    }).catch(function(){ wheezeFlash2('Save failed — check the values.','is-warn'); });
+  }
+  function wheezeActivatePage(page){
+    var tab=document.querySelector('.wheeze-tab[data-wheeze-page="'+page+'"]');
+    if(!tab) return;
+    $('dw-main').dataset.wheezePage=page;
+    document.querySelectorAll('.wheeze-tab').forEach(function(t){ t.setAttribute('aria-selected', String(t===tab)); });
+    if(page==='profiles') loadProfiles();
+  }
+
   function apply(s){
+    if(s && s.wheeze){ applyWheeze(s); return; }
     if(s && s.vent){ applyVent(s); return; }
     if(s && s.printer && s.wifi && s.lighting){ applyStatus(s); return; }
     if(!s || s.api_version!==2) return;
@@ -2151,7 +2404,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     fetch('/api/v2/state', {cache:'no-store'})
       .then(function(r){ if(!r.ok) throw 0; return r.json(); })
       .then(function(s){ apply(s); pollDelay=2000; })
-      .catch(function(){ product==='dragonvent'?ventSetConn(false):product==='dragonstatus'?statusSetConn(false):setConn(false); pollDelay=Math.min(10000, Math.round(pollDelay*1.6)); })
+      .catch(function(){ product==='dragonvent'?ventSetConn(false):product==='dragonstatus'?statusSetConn(false):product==='dragonwheeze'?wheezeSetConn(false):setConn(false); pollDelay=Math.min(10000, Math.round(pollDelay*1.6)); })
       .finally(function(){ polling=false; setTimeout(poll, pollDelay+Math.random()*250); });
   }
   function events(){
@@ -2159,7 +2412,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     function ev(e){ seen=true; try{ apply(JSON.parse(e.data)); }catch(_){} }
     es.addEventListener('state', ev);
     es.addEventListener('telemetry', ev);
-    es.onerror=function(){ es.close(); product==='dragonvent'?ventSetConn(false):product==='dragonstatus'?statusSetConn(false):setConn(false); if(!seen) poll(); else setTimeout(poll,1000); };
+    es.onerror=function(){ es.close(); product==='dragonvent'?ventSetConn(false):product==='dragonstatus'?statusSetConn(false):product==='dragonwheeze'?wheezeSetConn(false):setConn(false); if(!seen) poll(); else setTimeout(poll,1000); };
   }
 
   /* ---- Navigation: rail tabs. Home = live Dashboard; manual/auto/dry = U2 control
@@ -2183,6 +2436,31 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
   document.querySelectorAll('[data-quick-temp]').forEach(function(b){
     b.addEventListener('click', function(){ powerOn(Number(b.dataset.quickTemp)); });
   });
+  /* DragonWheeze dashboard: profile buttons + power/start/stop. */
+  document.querySelectorAll('[data-wheeze-profile]').forEach(function(b){
+    b.addEventListener('click', function(){
+      var i=Number(b.dataset.wheezeProfile);
+      var nm=(wheezeProfiles[i]&&wheezeProfiles[i].name)||'Profile';
+      wheezeCommand('apply_profile',{index:i})
+        .then(function(){ wheezeFlash(nm+' profile applied.','is-ok'); })
+        .catch(function(){ wheezeFlash('Command failed.','is-warn'); });
+    });
+  });
+  (function(){
+    var wire=function(id,name,ok){ var b=$(id); if(!b) return;
+      b.addEventListener('click', function(){
+        wheezeCommand(name).then(function(){ wheezeFlash(ok,'is-ok'); })
+          .catch(function(){ wheezeFlash('Command failed.','is-warn'); }); }); };
+    wire('dw-power','power_toggle','Power toggled.');
+    wire('dw-start','start','Drying started.');
+    wire('dw-stop','stop','Drying stopped.');
+  })();
+  /* Wheeze rail tabs (home/profiles are buttons; settings is a provisioning link). */
+  document.querySelectorAll('.wheeze-tab[data-wheeze-page]').forEach(function(t){
+    if(t.tagName==='A') return;
+    t.addEventListener('click', function(){ wheezeActivatePage(t.dataset.wheezePage); });
+  });
+  (function(){ var s=$('dw-profiles-save'); if(s) s.addEventListener('click', saveProfiles); })();
   function applyPresets(list){
     if(!Array.isArray(list)) return;
     document.querySelectorAll('.quick-actions .btn[data-quick-temp]').forEach(function(b,i){
