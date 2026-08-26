@@ -406,6 +406,11 @@ static void start_sta_mode(const char *ssid, const char *pass)
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &sta));
     s_state = DC_WIFI_STATE_STA_CONNECTING;
     ESP_ERROR_CHECK(esp_wifi_start());
+    // Keep the radio awake: with modem power-save on, the chip sleeps between
+    // beacons and can miss the DHCP OFFER/ACK — associating fine but never
+    // getting an IP (seen on the C3 in a mesh). Small power cost on a
+    // mains-powered device; big reliability win.
+    esp_wifi_set_ps(WIFI_PS_NONE);
 }
 
 // Bring up STA and the AP together (APSTA) for AP modes ALWAYS/TEMP when STA
@@ -433,6 +438,7 @@ static void start_sta_ap_mode(const char *ssid, const char *pass,
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap));
     s_state = DC_WIFI_STATE_STA_CONNECTING;
     ESP_ERROR_CHECK(esp_wifi_start());
+    esp_wifi_set_ps(WIFI_PS_NONE);   // no modem sleep — don't miss DHCP frames
     log_ap_up(ap_cfg);
 }
 
