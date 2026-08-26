@@ -32,7 +32,10 @@ static const char *TAG = "dc_wifi";
 #define KEY_AP_EN   "ap_enabled"   // legacy bool, migrated to KEY_AP_MODE
 #define KEY_AP_MODE "ap_mode"      // u8 dc_wifi_ap_mode_t
 
-#define STA_MAX_RETRIES  5
+// ~4 s per attempt, so 20 retries ≈ 80 s of trying before falling back to the
+// portal — enough to ride out a mesh roam or a router reboot (was 5 ≈ 20 s,
+// which gave up too fast in multi-AP/mesh networks).
+#define STA_MAX_RETRIES  20
 #define BIT_CONNECTED    BIT0
 #define BIT_FAILED       BIT1
 
@@ -238,7 +241,7 @@ static dc_wifi_ap_mode_t load_ap_mode(nvs_handle_t h)
 {
     uint8_t m;
     if (nvs_get_u8(h, KEY_AP_MODE, &m) == ESP_OK)
-        return m <= DC_WIFI_AP_TEMP ? (dc_wifi_ap_mode_t)m : DC_WIFI_AP_MODE_DEFAULT;
+        return m <= DC_WIFI_AP_FALLBACK ? (dc_wifi_ap_mode_t)m : DC_WIFI_AP_MODE_DEFAULT;
     uint8_t en;
     if (nvs_get_u8(h, KEY_AP_EN, &en) == ESP_OK)
         return en ? DC_WIFI_AP_MODE_DEFAULT : DC_WIFI_AP_OFF;
@@ -393,11 +396,20 @@ static void start_sta_mode(const char *ssid, const char *pass)
     wifi_config_t sta = {0};
     memcpy(sta.sta.ssid, ssid, strlen(ssid));
     memcpy(sta.sta.password, pass, strlen(pass));
+    // Default fast-scan (grab the first matching AP and stick to it). In a mesh
+    // an all-channel + by-signal scan re-picks a node every retry and thrashes
+    // between nodes on different channels — associating but never completing
+    // DHCP. Fast-scan is stickier and far more reliable here.
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &sta));
     s_state = DC_WIFI_STATE_STA_CONNECTING;
     ESP_ERROR_CHECK(esp_wifi_start());
+    // Keep the radio awake: with modem power-save on, the chip sleeps between
+    // beacons and can miss the DHCP OFFER/ACK — associating fine but never
+    // getting an IP (seen on the C3 in a mesh). Small power cost on a
+    // mains-powered device; big reliability win.
+    esp_wifi_set_ps(WIFI_PS_NONE);
 }
 
 // Bring up STA and the AP together (APSTA) for AP modes ALWAYS/TEMP when STA
@@ -413,6 +425,8 @@ static void start_sta_ap_mode(const char *ssid, const char *pass,
     wifi_config_t sta = {0};
     memcpy(sta.sta.ssid, ssid, strlen(ssid));
     memcpy(sta.sta.password, pass, strlen(pass));
+    // Default fast-scan (see start_sta_mode) — stickier than all-channel/by-signal
+    // in a mesh, which thrashes between nodes and fails to complete DHCP.
 
     wifi_config_t ap;
     fill_ap_wifi_config(&ap, ap_cfg);
@@ -422,6 +436,7 @@ static void start_sta_ap_mode(const char *ssid, const char *pass,
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap));
     s_state = DC_WIFI_STATE_STA_CONNECTING;
     ESP_ERROR_CHECK(esp_wifi_start());
+    esp_wifi_set_ps(WIFI_PS_NONE);   // no modem sleep — don't miss DHCP frames
     log_ap_up(ap_cfg);
 }
 
@@ -590,9 +605,12 @@ esp_err_t dc_wifi_start(void)
         dc_wifi_ap_config_t ap_cfg;
         load_ap_config(&ap_cfg);
 
-        // OFF => STA only; ALWAYS/TEMP => STA with a concurrent AP for reach/recovery.
-        if (ap_cfg.mode == DC_WIFI_AP_OFF) start_sta_mode(ssid, pass);
-        else                               start_sta_ap_mode(ssid, pass, &ap_cfg);
+        // OFF/FALLBACK => STA only (no concurrent AP contending for the radio);
+        // ALWAYS/TEMP => STA with a concurrent AP for reach/recovery.
+        if (ap_cfg.mode == DC_WIFI_AP_OFF || ap_cfg.mode == DC_WIFI_AP_FALLBACK)
+            start_sta_mode(ssid, pass);
+        else
+            start_sta_ap_mode(ssid, pass, &ap_cfg);
 
         // Wait for a decision. STA_MAX_RETRIES * ~4 s each ≈ 20 s of real work,
         // plus a generous margin so a slow-associating AP still has room.
@@ -609,6 +627,12 @@ esp_err_t dc_wifi_start(void)
                               "(recover via USB --erase-nvs or the Power+Auto combo)",
                          (unsigned)bits);
                 // Leave s_state == STA_CONNECTING; no AP was brought up.
+            } else if (ap_cfg.mode == DC_WIFI_AP_FALLBACK) {
+                // Ran STA-only (no concurrent AP), so nothing is on air yet —
+                // bring up the recovery portal now that STA has failed.
+                ESP_LOGW(TAG, "STA never came up (bits=0x%x); FALLBACK — starting "
+                              "recovery AP portal", (unsigned)bits);
+                start_ap_mode();   // sets s_state = AP_PORTAL
             } else {
                 // The concurrent AP is already on air; promote it to the setup
                 // portal (no-auth + captive DNS) so the creds can be fixed.
@@ -703,19 +727,21 @@ int dc_wifi_get_scan_results(wifi_ap_record_t *out, int max_count)
 const char *dc_wifi_ap_mode_to_str(dc_wifi_ap_mode_t mode)
 {
     switch (mode) {
-    case DC_WIFI_AP_ALWAYS: return "always";
-    case DC_WIFI_AP_TEMP:   return "temp";
-    case DC_WIFI_AP_OFF:    return "off";
-    default:                return "always";
+    case DC_WIFI_AP_ALWAYS:   return "always";
+    case DC_WIFI_AP_TEMP:     return "temp";
+    case DC_WIFI_AP_OFF:      return "off";
+    case DC_WIFI_AP_FALLBACK: return "fallback";
+    default:                  return "always";
     }
 }
 
 dc_wifi_ap_mode_t dc_wifi_ap_mode_from_str(const char *s, dc_wifi_ap_mode_t fallback)
 {
     if (s == NULL) return fallback;
-    if (strcmp(s, "always") == 0) return DC_WIFI_AP_ALWAYS;
-    if (strcmp(s, "temp")   == 0) return DC_WIFI_AP_TEMP;
-    if (strcmp(s, "off")    == 0) return DC_WIFI_AP_OFF;
+    if (strcmp(s, "always")   == 0) return DC_WIFI_AP_ALWAYS;
+    if (strcmp(s, "temp")     == 0) return DC_WIFI_AP_TEMP;
+    if (strcmp(s, "off")      == 0) return DC_WIFI_AP_OFF;
+    if (strcmp(s, "fallback") == 0) return DC_WIFI_AP_FALLBACK;
     return fallback;
 }
 
@@ -730,7 +756,7 @@ esp_err_t dc_wifi_set_ap_config_and_reboot(const dc_wifi_ap_config_t *cfg)
 {
     if (cfg == NULL || !dc_wifi_ssid_valid(cfg->ssid, true) ||
         !dc_wifi_password_valid(cfg->password) ||
-        cfg->mode > DC_WIFI_AP_TEMP) return ESP_ERR_INVALID_ARG;
+        cfg->mode > DC_WIFI_AP_FALLBACK) return ESP_ERR_INVALID_ARG;
 
     nvs_handle_t h;
     esp_err_t err = nvs_open(NVS_NS, NVS_READWRITE, &h);

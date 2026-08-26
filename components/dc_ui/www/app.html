@@ -1366,7 +1366,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
         <div class="provision-field"><label for="dc-ap-ssid">SSID (blank = default)</label><input id="dc-ap-ssid"></div>
         <div class="provision-field"><label for="dc-ap-password">Password (blank = default)</label><input id="dc-ap-password" type="password" autocomplete="new-password"></div>
         <div class="provision-field"><label for="dc-ap-ip">Gateway IPv4</label><input id="dc-ap-ip" inputmode="decimal"></div>
-        <div class="provision-field"><label for="dc-ap-mode">Availability</label><select id="dc-ap-mode"><option value="always">Always on</option><option value="temp">On for 15 min after reboot</option></select></div>
+        <div class="provision-field"><label for="dc-ap-mode">Availability</label><select id="dc-ap-mode"><option value="always">Always on</option><option value="temp">On for 15 min after reboot</option><option value="fallback">Only when Wi-Fi fails (most reliable)</option></select></div>
       </div>
       <div class="provision-actions"><button class="btn btn-primary" type="button" id="dc-ap-save">Save AP &amp; reboot</button></div><div class="provision-msg" id="dc-ap-msg"></div>
     </article>
