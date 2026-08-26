@@ -46,6 +46,8 @@ static EventGroupHandle_t s_events = NULL;
 static esp_netif_t *s_sta_netif = NULL;
 static esp_netif_t *s_ap_netif = NULL;
 static esp_timer_handle_t s_ap_temp_timer = NULL;   // TEMP-mode AP shutdown
+static esp_timer_handle_t s_no_ip_timer   = NULL;   // "associated but no DHCP IP" watchdog
+#define NO_IP_TIMEOUT_US  (8ULL * 1000000ULL)       // 8s to get a DHCP lease after associating
 static int s_retry = 0;
 static bool s_mdns_started = false;
 static char s_hostname[33] = DC_WIFI_DEFAULT_HOSTNAME;
@@ -386,6 +388,35 @@ static void schedule_ap_temp_shutdown(void)
                          (uint64_t)DC_WIFI_AP_TEMP_MINUTES * 60ULL * 1000000ULL);
 }
 
+// "Associated (L2 up) but no DHCP IP" watchdog. Some mesh nodes admit the client
+// yet never hand out an address; without this the STA sits on that dead node
+// until the 30s boot timeout. On timeout, disconnect so the retry path re-scans
+// and lands on a different node — cycling nodes until one gives a lease.
+static void no_ip_timeout_cb(void *arg)
+{
+    (void)arg;
+    if (s_state == DC_WIFI_STATE_STA_CONNECTING) {   // associated but GOT_IP hasn't fired
+        ESP_LOGW(TAG, "associated but no DHCP IP in %llus; dropping to try another AP",
+                 NO_IP_TIMEOUT_US / 1000000ULL);
+        esp_wifi_disconnect();   // -> STA_DISCONNECTED -> retry (re-scan)
+    }
+}
+
+static void no_ip_watch_start(void)
+{
+    if (s_no_ip_timer == NULL) {
+        const esp_timer_create_args_t args = { .callback = no_ip_timeout_cb, .name = "no_ip" };
+        if (esp_timer_create(&args, &s_no_ip_timer) != ESP_OK) return;
+    }
+    esp_timer_stop(s_no_ip_timer);
+    esp_timer_start_once(s_no_ip_timer, NO_IP_TIMEOUT_US);
+}
+
+static void no_ip_watch_stop(void)
+{
+    if (s_no_ip_timer) esp_timer_stop(s_no_ip_timer);
+}
+
 // ---------- STA mode ----------
 
 static void start_sta_mode(const char *ssid, const char *pass)
@@ -466,7 +497,11 @@ static void on_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *da
     if (id == WIFI_EVENT_STA_START) {
         // Only auto-connect if we're actually trying to be a station.
         if (s_state == DC_WIFI_STATE_STA_CONNECTING) esp_wifi_connect();
+    } else if (id == WIFI_EVENT_STA_CONNECTED) {
+        // L2 associated — arm the no-DHCP-IP watchdog until GOT_IP fires.
+        no_ip_watch_start();
     } else if (id == WIFI_EVENT_STA_DISCONNECTED) {
+        no_ip_watch_stop();
         const wifi_event_sta_disconnected_t *d = (const wifi_event_sta_disconnected_t *)data;
         if (d) s_last_disc_reason = d->reason;   // keep the latest reason for the setup page
         if (s_state == DC_WIFI_STATE_STA_CONNECTING || s_state == DC_WIFI_STATE_STA_CONNECTED) {
@@ -487,6 +522,7 @@ static void on_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *da
 static void on_ip_event(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
     if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
+        no_ip_watch_stop();
         ip_event_got_ip_t *evt = (ip_event_got_ip_t *)data;
         ESP_LOGI(TAG, "got IP " IPSTR, IP2STR(&evt->ip_info.ip));
         s_retry = 0;
