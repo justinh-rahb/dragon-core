@@ -396,11 +396,10 @@ static void start_sta_mode(const char *ssid, const char *pass)
     wifi_config_t sta = {0};
     memcpy(sta.sta.ssid, ssid, strlen(ssid));
     memcpy(sta.sta.password, pass, strlen(pass));
-    // Scan every channel and connect to the STRONGEST AP with this SSID, not the
-    // first one heard. In mesh/multi-AP networks the default fast-scan can latch
-    // onto a distant, weak node and drop constantly.
-    sta.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
-    sta.sta.sort_method = WIFI_CONNECT_AP_BY_SIGNAL;
+    // Default fast-scan (grab the first matching AP and stick to it). In a mesh
+    // an all-channel + by-signal scan re-picks a node every retry and thrashes
+    // between nodes on different channels — associating but never completing
+    // DHCP. Fast-scan is stickier and far more reliable here.
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &sta));
@@ -426,9 +425,8 @@ static void start_sta_ap_mode(const char *ssid, const char *pass,
     wifi_config_t sta = {0};
     memcpy(sta.sta.ssid, ssid, strlen(ssid));
     memcpy(sta.sta.password, pass, strlen(pass));
-    // Strongest-AP selection (see start_sta_mode) — important in mesh networks.
-    sta.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
-    sta.sta.sort_method = WIFI_CONNECT_AP_BY_SIGNAL;
+    // Default fast-scan (see start_sta_mode) — stickier than all-channel/by-signal
+    // in a mesh, which thrashes between nodes and fails to complete DHCP.
 
     wifi_config_t ap;
     fill_ap_wifi_config(&ap, ap_cfg);
