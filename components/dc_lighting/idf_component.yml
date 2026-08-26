@@ -1,4 +1,4 @@
-version: "0.29.0"
+version: "0.30.0"
 description: Board-neutral WS2812 renderer for Dragon-family firmware
 license: MIT
 dependencies:
