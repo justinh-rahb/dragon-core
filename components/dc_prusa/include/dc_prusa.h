@@ -38,6 +38,7 @@ typedef struct {
     float bed_temp;             // printer.temp_bed (°C); NaN if never read
     float bed_target;           // printer.target_bed (°C; 0 = bed off)
     char  printer_state[12];    // printer.state ("IDLE"/"PRINTING"/...)
+    uint32_t status_age_ms;      // age of last complete status; UINT32_MAX if unavailable
 } dc_prusa_status_t;
 
 esp_err_t dc_prusa_start(void);
@@ -48,6 +49,9 @@ esp_err_t dc_prusa_set_config(const dc_prusa_config_t *cfg);
 
 // Persisted config, readable even before dc_prusa_start().
 esp_err_t dc_prusa_get_config(dc_prusa_config_t *out);
+// Returns a freshness-filtered snapshot. If no complete status has arrived within
+// 15 seconds, online is false, an ONLINE/CONNECTING state is reported as OFFLINE,
+// bed_temp is NaN, bed_target is 0, and printer_state is empty.
 esp_err_t dc_prusa_get_status(dc_prusa_status_t *out);
 
 // Wipe saved PrusaLink config (factory reset).

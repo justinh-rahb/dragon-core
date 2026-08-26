@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: MIT
 #include "dc_prusa.h"
+#include "dc_prusa_freshness.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "nvs.h"
 #include "cJSON.h"
 
@@ -32,7 +34,9 @@ static dc_prusa_status_t s_status = {
     .bed_temp = NAN,
     .bed_target = 0.0f,
     .printer_state = "",
+    .status_age_ms = UINT32_MAX,
 };
+static int64_t s_status_us = 0;  // monotonic timestamp of last complete status sample
 
 const char *dc_prusa_state_str(dc_prusa_state_t s)
 {
@@ -125,6 +129,8 @@ static bool parse_status(const char *json)
         s_status.bed_target = bed_target;
         strncpy(s_status.printer_state, state, sizeof(s_status.printer_state) - 1);
         s_status.printer_state[sizeof(s_status.printer_state) - 1] = '\0';
+        s_status_us = esp_timer_get_time();
+        s_status.status_age_ms = 0;
         xSemaphoreGive(s_lock);
     }
     cJSON_Delete(root);
@@ -249,10 +255,18 @@ esp_err_t dc_prusa_get_config(dc_prusa_config_t *out)
 esp_err_t dc_prusa_get_status(dc_prusa_status_t *out)
 {
     if (!out) return ESP_ERR_INVALID_ARG;
-    if (!s_lock) { *out = s_status; return ESP_OK; }
-    xSemaphoreTake(s_lock, portMAX_DELAY);
-    *out = s_status;
-    xSemaphoreGive(s_lock);
+
+    int64_t sample_us = 0;
+    if (!s_lock) {
+        *out = s_status;
+    } else {
+        xSemaphoreTake(s_lock, portMAX_DELAY);
+        *out = s_status;
+        sample_us = s_status_us;
+        xSemaphoreGive(s_lock);
+    }
+
+    dc_prusa_status_apply_freshness(out, esp_timer_get_time(), sample_us);
     return ESP_OK;
 }
 
