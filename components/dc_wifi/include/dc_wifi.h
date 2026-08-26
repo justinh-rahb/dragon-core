@@ -45,6 +45,10 @@ typedef enum {
     DC_WIFI_AP_TEMP   = 2,  // AP up for DC_WIFI_AP_TEMP_MINUTES after boot, then
                             //   dropped — unless STA never connected, in which
                             //   case the AP is kept as the recovery portal.
+    DC_WIFI_AP_FALLBACK = 3, // STA-only while connected (no concurrent AP, so no
+                            //   APSTA channel/power contention), but the recovery
+                            //   portal IS brought up if STA fails to join. Best of
+                            //   both: clean STA + no-USB recovery.
 } dc_wifi_ap_mode_t;
 
 // Minutes the DC_WIFI_AP_TEMP window stays open after boot.
