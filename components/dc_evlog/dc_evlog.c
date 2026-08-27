@@ -18,12 +18,13 @@ static size_t            s_count = 0;  // number of valid entries (<= MAX)
 // Independent of the curated event ring above. A spinlock (not a mutex) guards it
 // because the esp_log vprintf hook can be reached from many contexts and must never
 // block or assert; the critical sections are a short append (<=CON_LINE bytes) and
-// a rarely-called full-ring snapshot. We NEVER log from inside the hook.
+// a rarely-called snapshot copy. We NEVER log from inside the hook.
 #define CON_LINE  200
 static portMUX_TYPE     s_con_mux = portMUX_INITIALIZER_UNLOCKED;
 static char             s_con[DC_EVLOG_CONSOLE_BYTES];
 static size_t           s_con_head = 0;    // next write index
 static bool             s_con_full = false;
+static uint64_t         s_con_write_seq = 0; // total bytes appended; guarded by s_con_mux
 static vprintf_like_t   s_prev_vprintf = NULL;
 static bool             s_con_on = false;
 
@@ -33,6 +34,7 @@ static void con_append(const char *p, int n)
     portENTER_CRITICAL(&s_con_mux);
     for (int i = 0; i < n; i++) {
         s_con[s_con_head++] = p[i];
+        s_con_write_seq++;
         if (s_con_head >= DC_EVLOG_CONSOLE_BYTES) { s_con_head = 0; s_con_full = true; }
     }
     portEXIT_CRITICAL(&s_con_mux);
@@ -128,4 +130,57 @@ size_t dc_evlog_console_snapshot(char *out, size_t max)
 
     out[len] = '\0';
     return len;
+}
+
+static size_t con_copy_view_locked(const dc_evlog_console_view_t *view,
+                                   size_t offset, char *out, size_t max)
+{
+    if (offset >= view->len || max == 0) return 0;
+    size_t want = view->len - offset;
+    if (want > max) want = max;
+
+    size_t idx = (view->start + offset) % DC_EVLOG_CONSOLE_BYTES;
+    size_t first = DC_EVLOG_CONSOLE_BYTES - idx;
+    if (first > want) first = want;
+    memcpy(out, s_con + idx, first);
+    if (first < want) memcpy(out + first, s_con, want - first);
+    return want;
+}
+
+size_t dc_evlog_console_snapshot_begin(dc_evlog_console_view_t *view,
+                                       char *out, size_t max)
+{
+    if (view == NULL || out == NULL || max == 0) return 0;
+
+    portENTER_CRITICAL(&s_con_mux);
+    view->start = s_con_full ? s_con_head : 0;
+    view->len = s_con_full ? DC_EVLOG_CONSOLE_BYTES : s_con_head;
+    view->write_seq = s_con_write_seq;
+    size_t written = con_copy_view_locked(view, 0, out, max);
+    portEXIT_CRITICAL(&s_con_mux);
+    return written;
+}
+
+bool dc_evlog_console_snapshot_read(const dc_evlog_console_view_t *view,
+                                    size_t offset, char *out, size_t max,
+                                    size_t *written)
+{
+    if (written == NULL) return false;
+    *written = 0;
+    if (view == NULL || out == NULL || max == 0 || offset > view->len) return false;
+    if (offset == view->len) return true;
+
+    portENTER_CRITICAL(&s_con_mux);
+    uint64_t advanced = s_con_write_seq - view->write_seq;
+    // Before the captured ring was full, new bytes first consume the free tail;
+    // after that they overwrite the captured snapshot oldest-first. A chunk at
+    // `offset` remains coherent iff producer progress has not reached it yet.
+    uint64_t overwrite_budget = (uint64_t)(DC_EVLOG_CONSOLE_BYTES - view->len) + offset;
+    if (advanced > overwrite_budget) {
+        portEXIT_CRITICAL(&s_con_mux);
+        return false;
+    }
+    *written = con_copy_view_locked(view, offset, out, max);
+    portEXIT_CRITICAL(&s_con_mux);
+    return true;
 }

@@ -6,6 +6,7 @@
 // lock. Add is safe from any task including ISRs-that-can-take-a-mutex (which
 // means: not real ISRs — this is a coarse-grained mutex, not a spinlock).
 
+#include <stdbool.h>
 #include <stdint.h>
 #include <stddef.h>
 
@@ -46,3 +47,21 @@ void dc_evlog_console_init(void);
 // Copy the console ring, oldest -> newest, into `out` (always NUL-terminated).
 // Returns bytes written (excluding the NUL). `max` should be >= the ring size + 1.
 size_t dc_evlog_console_snapshot(char *out, size_t max);
+
+// Bounded-memory console snapshot view for streaming callers. `begin` captures a
+// logical oldest->newest view and copies its first chunk atomically with that
+// capture, so a producer cannot invalidate byte zero between those operations.
+// `read` copies later chunks without holding the console spinlock across caller
+// I/O. If logging has advanced far enough to overwrite unread bytes from the
+// captured view, `read` returns false instead of mixing two snapshots.
+typedef struct {
+    size_t start;
+    size_t len;
+    uint64_t write_seq;
+} dc_evlog_console_view_t;
+
+size_t dc_evlog_console_snapshot_begin(dc_evlog_console_view_t *view,
+                                       char *out, size_t max);
+bool dc_evlog_console_snapshot_read(const dc_evlog_console_view_t *view,
+                                    size_t offset, char *out, size_t max,
+                                    size_t *written);
