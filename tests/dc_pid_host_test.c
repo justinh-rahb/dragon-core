@@ -8,6 +8,25 @@
 #define CHECK(x) do { if (!(x)) { fprintf(stderr, "%s:%d: CHECK failed: %s\n", __FILE__, __LINE__, #x); exit(1); } } while (0)
 #define NEAR(a,b,e) CHECK(fabsf((a) - (b)) <= (e))
 
+static void check_state_equal(const dc_pid_state_t *actual,
+                              const dc_pid_state_t *expected)
+{
+    CHECK(actual->integral == expected->integral);
+    CHECK(actual->prev_measurement == expected->prev_measurement);
+    CHECK(actual->derivative_filtered == expected->derivative_filtered);
+    CHECK(actual->initialized == expected->initialized);
+}
+
+static void check_result_zero(const dc_pid_result_t *result)
+{
+    CHECK(result->output == 0.0f);
+    CHECK(result->p == 0.0f);
+    CHECK(result->i == 0.0f);
+    CHECK(result->d == 0.0f);
+    CHECK(!result->saturated_low);
+    CHECK(!result->saturated_high);
+}
+
 int main(void)
 {
     dc_pid_config_t c = {
@@ -70,17 +89,19 @@ int main(void)
     CHECK(s.prev_measurement == 0.0f);
     CHECK(s.derivative_filtered == 0.0f);
 
-    /* Invalid sample periods fail closed and reset state. */
+    /* Invalid sample periods fail closed without discarding valid state. */
     CHECK(dc_pid_step(&s, &c, 60.0f, 40.0f, 1.0f, true, &r));
+    dc_pid_state_t before_failure = s;
     CHECK(!dc_pid_step(&s, &c, 60.0f, 40.0f, 0.0f, true, &r));
-    CHECK(!s.initialized && r.output == 0.0f);
+    check_state_equal(&s, &before_failure);
+    CHECK(r.output == 0.0f);
     CHECK(!dc_pid_step(&s, &c, 60.0f, 40.0f, -1.0f, true, &r));
-    CHECK(!s.initialized && r.output == 0.0f);
+    check_state_equal(&s, &before_failure);
+    CHECK(r.output == 0.0f);
 
-    /* Invalid/non-finite inputs fail closed at the API boundary. */
-    CHECK(dc_pid_step(&s, &c, 60.0f, 40.0f, 1.0f, true, &r));
+    /* Invalid/non-finite inputs also preserve the last valid controller state. */
     CHECK(!dc_pid_step(&s, &c, 60.0f, NAN, 1.0f, true, &r));
-    CHECK(!s.initialized);
+    check_state_equal(&s, &before_failure);
     CHECK(r.output == 0.0f);
 
     /* Corrupted controller state is rejected rather than propagated. */
@@ -91,20 +112,58 @@ int main(void)
     CHECK(!dc_pid_step(&s, &c, 60.0f, 40.0f, 1.0f, true, &r));
     CHECK(!s.initialized && r.output == 0.0f);
 
-    /* Finite API inputs that overflow an intermediate calculation also fail
-     * closed instead of poisoning the persistent PID state. */
+    /* Finite inputs that overflow before derivative processing fail closed and
+     * leave the last valid state untouched. */
+    dc_pid_reset(&s);
+    CHECK(dc_pid_step(&s, &c, 60.0f, 40.0f, 1.0f, true, &r));
+    before_failure = s;
     CHECK(!dc_pid_step(&s, &c, FLT_MAX, -FLT_MAX, 1.0f, true, &r));
-    CHECK(!s.initialized && r.output == 0.0f);
+    check_state_equal(&s, &before_failure);
+    CHECK(r.output == 0.0f);
 
-    CHECK(dc_pid_step(&s, &c, 0.0f, 0.0f, 1.0f, false, &r));
+    /* Derivative overflow must not partially advance measurement history. */
     CHECK(!dc_pid_step(&s, &c, 0.0f, FLT_MAX, FLT_MIN, false, &r));
-    CHECK(!s.initialized && r.output == 0.0f);
+    check_state_equal(&s, &before_failure);
+    CHECK(r.output == 0.0f);
+
+    /* Reproduce the reviewed mid-step failure: derivative math is valid, then
+     * proportional overflow occurs. Integral and derivative history survive. */
+    dc_pid_config_t overflow_after_derivative = c;
+    overflow_after_derivative.kp = FLT_MAX;
+    overflow_after_derivative.output_min = -FLT_MAX;
+    overflow_after_derivative.output_max = FLT_MAX;
+    before_failure = s;
+    CHECK(!dc_pid_step(&s, &overflow_after_derivative,
+                       3.0f, 1.0f, 1.0f, false, &r));
+    check_state_equal(&s, &before_failure);
+    check_result_zero(&r);
+
+    /* Integral arithmetic can fail after derivative calculation too; no
+     * candidate state is committed until the complete step is valid. */
+    dc_pid_config_t integral_overflow = c;
+    integral_overflow.kp = 0.0f;
+    integral_overflow.ki = FLT_MAX;
+    integral_overflow.output_min = -FLT_MAX;
+    integral_overflow.output_max = FLT_MAX;
+    before_failure = s;
+    CHECK(!dc_pid_step(&s, &integral_overflow,
+                       3.0f, 1.0f, 1.0f, true, &r));
+    check_state_equal(&s, &before_failure);
+    check_result_zero(&r);
+
+    /* The next valid sample resumes from the preserved measurement history. */
+    CHECK(dc_pid_step(&s, &c, 60.0f, 41.0f, 1.0f, false, &r));
+    CHECK(s.initialized);
+    CHECK(s.prev_measurement == 41.0f);
+    CHECK(s.integral == before_failure.integral);
 
     /* Invalid configuration is rejected. */
     dc_pid_config_t bad = c;
     bad.output_min = bad.output_max;
+    before_failure = s;
     CHECK(!dc_pid_step(&s, &bad, 60.0f, 40.0f, 1.0f, true, &r));
-    CHECK(!s.initialized && r.output == 0.0f);
+    check_state_equal(&s, &before_failure);
+    CHECK(r.output == 0.0f);
 
     /* PI, P-only, and I-only controllers naturally disable derivative
      * filtering with kd=0 and derivative_alpha=0. */

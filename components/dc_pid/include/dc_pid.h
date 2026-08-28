@@ -55,9 +55,12 @@ void dc_pid_reset(dc_pid_state_t *state);
  * windup while a safety governor or actuator inhibit overrides the requested
  * output.
  *
- * Returns false for invalid/non-finite inputs or invalid configuration. On
- * failure state is reset and result is zeroed. The caller remains responsible
- * for selecting the safe actuator state.
+ * Returns false for invalid/non-finite inputs, invalid configuration, or an
+ * invalid intermediate calculation. The result is zeroed and previously valid
+ * controller state is preserved, so a rejected sample does not advance history
+ * or discard accumulated integral. Corrupted input state is reset because it
+ * cannot be preserved safely. The caller remains responsible for selecting the
+ * safe actuator state.
  */
 bool dc_pid_step(dc_pid_state_t *state,
                  const dc_pid_config_t *config,
