@@ -34,9 +34,9 @@ static void con_append(const char *p, int n)
     portENTER_CRITICAL(&s_con_mux);
     for (int i = 0; i < n; i++) {
         s_con[s_con_head++] = p[i];
-        s_con_write_seq++;
         if (s_con_head >= DC_EVLOG_CONSOLE_BYTES) { s_con_head = 0; s_con_full = true; }
     }
+    s_con_write_seq += (uint64_t)n;
     portEXIT_CRITICAL(&s_con_mux);
 }
 

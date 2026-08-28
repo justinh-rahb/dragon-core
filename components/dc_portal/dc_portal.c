@@ -305,14 +305,35 @@ static esp_err_t logs_get(httpd_req_t *req)
 static esp_err_t console_data_get(httpd_req_t *req)
 {
     if (require_auth(req) != ESP_OK) return ESP_OK;
-    char *buf = malloc(DC_EVLOG_CONSOLE_BYTES + 1);
-    if (!buf) return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "out of memory");
-    size_t n = dc_evlog_console_snapshot(buf, DC_EVLOG_CONSOLE_BYTES + 1);
+
+    char buf[1024];
+    dc_evlog_console_view_t view;
+    size_t offset = 0;
+    size_t n = dc_evlog_console_snapshot_begin(&view, buf, sizeof(buf));
+
     httpd_resp_set_type(req, "text/plain; charset=utf-8");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-    esp_err_t err = httpd_resp_send(req, buf, n);
-    free(buf);
-    return err;
+
+    if (n > 0) {
+        esp_err_t err = httpd_resp_send_chunk(req, buf, n);
+        if (err != ESP_OK) return err;
+        offset = n;
+    }
+
+    while (offset < view.len) {
+        if (!dc_evlog_console_snapshot_read(&view, offset, buf, sizeof(buf), &n)) {
+            // The unread portion was overwritten. Abort the response rather than
+            // append bytes from a different logical snapshot.
+            return ESP_FAIL;
+        }
+        if (n == 0) return ESP_FAIL;
+
+        esp_err_t err = httpd_resp_send_chunk(req, buf, n);
+        if (err != ESP_OK) return err;
+        offset += n;
+    }
+
+    return httpd_resp_send_chunk(req, NULL, 0);
 }
 
 // Compact, theme-aware page shell for /console. Mirrors the
