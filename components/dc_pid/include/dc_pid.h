@@ -8,12 +8,21 @@ extern "C" {
 
 /** Generic PID gains and bounds. dc_pid has no actuator or safety authority. */
 typedef struct {
-    float kp;
-    float ki;
-    float kd;
-    float derivative_alpha; /* derivative LPF coefficient in (0, 1] */
+    float kp; /* non-negative; zero disables the proportional term */
+    float ki; /* non-negative; zero disables integral accumulation */
+    float kd; /* non-negative; zero disables the derivative term */
+    /**
+     * Per-step derivative EMA coefficient in (0, 1]. A value of zero is valid
+     * only when kd is zero. Stable update cadence is expected because this is
+     * a per-step coefficient, not a time constant or cutoff frequency.
+     */
+    float derivative_alpha;
     float output_min;
     float output_max;
+    /**
+     * Integral limits must contain zero so reset state is valid. Equal limits
+     * are allowed; [0, 0] disables/pins the integral contribution at zero.
+     */
     float integral_min;
     float integral_max;
 } dc_pid_config_t;
@@ -30,7 +39,9 @@ typedef struct {
     float p;
     float i;
     float d;
+    /** True only when raw output was below output_min and was clamped. */
     bool saturated_low;
+    /** True only when raw output was above output_max and was clamped. */
     bool saturated_high;
 } dc_pid_result_t;
 

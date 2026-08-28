@@ -14,12 +14,15 @@ static bool config_valid(const dc_pid_config_t *c)
 {
     return c &&
            isfinite(c->kp) && isfinite(c->ki) && isfinite(c->kd) &&
+           c->kp >= 0.0f && c->ki >= 0.0f && c->kd >= 0.0f &&
            isfinite(c->derivative_alpha) &&
-           c->derivative_alpha > 0.0f && c->derivative_alpha <= 1.0f &&
+           c->derivative_alpha >= 0.0f && c->derivative_alpha <= 1.0f &&
+           (c->kd == 0.0f || c->derivative_alpha > 0.0f) &&
            isfinite(c->output_min) && isfinite(c->output_max) &&
            c->output_min < c->output_max &&
            isfinite(c->integral_min) && isfinite(c->integral_max) &&
-           c->integral_min <= c->integral_max;
+           c->integral_min <= c->integral_max &&
+           c->integral_min <= 0.0f && c->integral_max >= 0.0f;
 }
 
 static bool state_valid(const dc_pid_state_t *state)
@@ -68,20 +71,24 @@ bool dc_pid_step(dc_pid_state_t *state,
         state->initialized = true;
     }
 
-    const float measurement_delta = measurement - state->prev_measurement;
-    if (!isfinite(measurement_delta))
-        return fail_step(state);
+    if (config->kd > 0.0f) {
+        const float measurement_delta = measurement - state->prev_measurement;
+        if (!isfinite(measurement_delta))
+            return fail_step(state);
 
-    const float derivative_raw = -measurement_delta / dt_s;
-    if (!isfinite(derivative_raw))
-        return fail_step(state);
+        const float derivative_raw = -measurement_delta / dt_s;
+        if (!isfinite(derivative_raw))
+            return fail_step(state);
 
-    const float derivative_filtered = state->derivative_filtered +
-        config->derivative_alpha * (derivative_raw - state->derivative_filtered);
-    if (!isfinite(derivative_filtered))
-        return fail_step(state);
+        const float derivative_filtered = state->derivative_filtered +
+            config->derivative_alpha * (derivative_raw - state->derivative_filtered);
+        if (!isfinite(derivative_filtered))
+            return fail_step(state);
 
-    state->derivative_filtered = derivative_filtered;
+        state->derivative_filtered = derivative_filtered;
+    } else {
+        state->derivative_filtered = 0.0f;
+    }
     state->prev_measurement = measurement;
 
     const float p = config->kp * error;

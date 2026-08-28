@@ -106,6 +106,100 @@ int main(void)
     CHECK(!dc_pid_step(&s, &bad, 60.0f, 40.0f, 1.0f, true, &r));
     CHECK(!s.initialized && r.output == 0.0f);
 
+    /* PI, P-only, and I-only controllers naturally disable derivative
+     * filtering with kd=0 and derivative_alpha=0. */
+    dc_pid_config_t pi = c;
+    pi.kd = 0.0f;
+    pi.derivative_alpha = 0.0f;
+    dc_pid_reset(&s);
+    CHECK(dc_pid_step(&s, &pi, 10.0f, 0.0f, 1.0f, true, &r));
+    CHECK(r.p > 0.0f && r.i > 0.0f && r.d == 0.0f);
+    CHECK(dc_pid_step(&s, &pi, 10.0f, 1.0f, 1.0f, true, &r));
+    CHECK(r.d == 0.0f);
+    CHECK(s.prev_measurement == 1.0f);
+    CHECK(s.derivative_filtered == 0.0f);
+
+    dc_pid_config_t p_only = pi;
+    p_only.ki = 0.0f;
+    dc_pid_reset(&s);
+    CHECK(dc_pid_step(&s, &p_only, 10.0f, 0.0f, 1.0f, true, &r));
+    CHECK(r.p > 0.0f && r.i == 0.0f && r.d == 0.0f);
+
+    dc_pid_config_t i_only = pi;
+    i_only.kp = 0.0f;
+    dc_pid_reset(&s);
+    CHECK(dc_pid_step(&s, &i_only, 10.0f, 0.0f, 1.0f, true, &r));
+    CHECK(r.p == 0.0f && r.i > 0.0f && r.d == 0.0f);
+
+    dc_pid_config_t all_zero = i_only;
+    all_zero.ki = 0.0f;
+    dc_pid_reset(&s);
+    CHECK(dc_pid_step(&s, &all_zero, 10.0f, 0.0f, 1.0f, true, &r));
+    CHECK(r.output == 0.0f && r.p == 0.0f && r.i == 0.0f && r.d == 0.0f);
+
+    /* With D disabled, irrelevant derivative division cannot fail a valid
+     * controller step, and live measurement history remains current. */
+    dc_pid_reset(&s);
+    CHECK(dc_pid_step(&s, &all_zero, 0.0f, 0.0f, 1.0f, false, &r));
+    CHECK(dc_pid_step(&s, &all_zero, FLT_MAX, FLT_MAX, FLT_MIN, false, &r));
+    CHECK(s.prev_measurement == FLT_MAX);
+    CHECK(s.derivative_filtered == 0.0f);
+
+    /* Derivative filtering still requires a positive alpha when D is active. */
+    bad = c;
+    bad.derivative_alpha = 0.0f;
+    dc_pid_reset(&s);
+    CHECK(!dc_pid_step(&s, &bad, 10.0f, 0.0f, 1.0f, true, &r));
+    CHECK(!s.initialized && r.output == 0.0f);
+
+    /* Reverse/mixed-action gains are outside the direct-action contract. */
+    bad = c;
+    bad.kp = -0.01f;
+    CHECK(!dc_pid_step(&s, &bad, 10.0f, 0.0f, 1.0f, true, &r));
+    bad = c;
+    bad.ki = -0.01f;
+    CHECK(!dc_pid_step(&s, &bad, 10.0f, 0.0f, 1.0f, true, &r));
+    bad = c;
+    bad.kd = -0.01f;
+    CHECK(!dc_pid_step(&s, &bad, 10.0f, 0.0f, 1.0f, true, &r));
+
+    /* Integral limits must contain reset value zero. Equal [0,0] limits are
+     * valid and pin the integral term at zero. */
+    bad = pi;
+    bad.integral_min = 0.1f;
+    bad.integral_max = 1.0f;
+    CHECK(!dc_pid_step(&s, &bad, 10.0f, 0.0f, 1.0f, true, &r));
+    bad = pi;
+    bad.integral_min = -1.0f;
+    bad.integral_max = -0.1f;
+    CHECK(!dc_pid_step(&s, &bad, 10.0f, 0.0f, 1.0f, true, &r));
+    bad = pi;
+    bad.integral_min = 0.5f;
+    bad.integral_max = -0.5f;
+    CHECK(!dc_pid_step(&s, &bad, 10.0f, 0.0f, 1.0f, true, &r));
+
+    dc_pid_config_t pinned_i = pi;
+    pinned_i.integral_min = 0.0f;
+    pinned_i.integral_max = 0.0f;
+    dc_pid_reset(&s);
+    CHECK(dc_pid_step(&s, &pinned_i, 10.0f, 0.0f, 1.0f, true, &r));
+    CHECK(s.integral == 0.0f && r.i == 0.0f);
+
+    /* Saturation flags report actual clamping, not exact equality at a rail. */
+    dc_pid_config_t rails = all_zero;
+    rails.kp = 1.0f;
+    rails.output_min = -1.0f;
+    rails.output_max = 1.0f;
+    dc_pid_reset(&s);
+    CHECK(dc_pid_step(&s, &rails, 1.0f, 0.0f, 1.0f, false, &r));
+    CHECK(r.output == 1.0f && !r.saturated_low && !r.saturated_high);
+    CHECK(dc_pid_step(&s, &rails, -1.0f, 0.0f, 1.0f, false, &r));
+    CHECK(r.output == -1.0f && !r.saturated_low && !r.saturated_high);
+    CHECK(dc_pid_step(&s, &rails, 2.0f, 0.0f, 1.0f, false, &r));
+    CHECK(r.output == 1.0f && !r.saturated_low && r.saturated_high);
+    CHECK(dc_pid_step(&s, &rails, -2.0f, 0.0f, 1.0f, false, &r));
+    CHECK(r.output == -1.0f && r.saturated_low && !r.saturated_high);
+
     puts("dc_pid host checks: PASS");
     return 0;
 }
