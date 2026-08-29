@@ -51,9 +51,11 @@ void dc_pid_reset(dc_pid_state_t *state);
  * Advance one PID sample.
  *
  * Derivative is taken on measurement to avoid setpoint kick. When
- * integrate=false the integrator is held, allowing product firmware to stop
- * windup while a safety governor or actuator inhibit overrides the requested
- * output.
+ * integrate=false the integrator is held within the active configured bounds,
+ * allowing product firmware to stop windup while a safety governor or actuator
+ * inhibit overrides the requested output. Every successful step normalizes a
+ * restored integral, or one outside newly changed bounds, before optional
+ * accumulation.
  *
  * Returns false for invalid/non-finite inputs, invalid configuration, or an
  * invalid intermediate calculation. The result is zeroed and previously valid

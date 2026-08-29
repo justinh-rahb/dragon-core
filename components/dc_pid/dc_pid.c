@@ -88,12 +88,14 @@ bool dc_pid_step(dc_pid_state_t *state,
     const float d = config->kd * next_derivative_filtered;
     if (!isfinite(p) || !isfinite(d)) return false;
 
-    float next_integral = state->integral;
+    float next_integral = clampf(state->integral,
+                                 config->integral_min,
+                                 config->integral_max);
     if (integrate) {
         const float integral_delta = config->ki * error * dt_s;
         if (!isfinite(integral_delta)) return false;
 
-        const float candidate_i_unclamped = state->integral + integral_delta;
+        const float candidate_i_unclamped = next_integral + integral_delta;
         if (!isfinite(candidate_i_unclamped)) return false;
 
         const float candidate_i = clampf(candidate_i_unclamped,

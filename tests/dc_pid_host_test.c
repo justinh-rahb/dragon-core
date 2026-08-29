@@ -88,14 +88,29 @@ int main(void)
     CHECK(s.integral == 0.0f);
     CHECK(s.prev_measurement == 0.0f);
     CHECK(s.derivative_filtered == 0.0f);
+    dc_pid_reset(NULL);
 
-    /* Invalid sample periods fail closed without discarding valid state. */
+    /* Required pointers fail safely. A missing result cannot be zeroed, but
+     * must not mutate otherwise valid controller state. */
+    r = (dc_pid_result_t){ .output = 1.0f };
+    CHECK(!dc_pid_step(NULL, &c, 60.0f, 40.0f, 1.0f, true, &r));
+    check_result_zero(&r);
     CHECK(dc_pid_step(&s, &c, 60.0f, 40.0f, 1.0f, true, &r));
     dc_pid_state_t before_failure = s;
+    CHECK(!dc_pid_step(&s, &c, 60.0f, 40.0f, 1.0f, true, NULL));
+    check_state_equal(&s, &before_failure);
+    CHECK(!dc_pid_step(&s, NULL, 60.0f, 40.0f, 1.0f, true, &r));
+    check_state_equal(&s, &before_failure);
+    check_result_zero(&r);
+
+    /* Invalid sample periods fail closed without discarding valid state. */
     CHECK(!dc_pid_step(&s, &c, 60.0f, 40.0f, 0.0f, true, &r));
     check_state_equal(&s, &before_failure);
     CHECK(r.output == 0.0f);
     CHECK(!dc_pid_step(&s, &c, 60.0f, 40.0f, -1.0f, true, &r));
+    check_state_equal(&s, &before_failure);
+    CHECK(r.output == 0.0f);
+    CHECK(!dc_pid_step(&s, &c, 60.0f, 40.0f, INFINITY, true, &r));
     check_state_equal(&s, &before_failure);
     CHECK(r.output == 0.0f);
 
@@ -164,6 +179,16 @@ int main(void)
     CHECK(!dc_pid_step(&s, &bad, 60.0f, 40.0f, 1.0f, true, &r));
     check_state_equal(&s, &before_failure);
     CHECK(r.output == 0.0f);
+    bad = c;
+    bad.output_min = 2.0f;
+    bad.output_max = 1.0f;
+    CHECK(!dc_pid_step(&s, &bad, 60.0f, 40.0f, 1.0f, true, &r));
+    bad = c;
+    bad.output_min = NAN;
+    CHECK(!dc_pid_step(&s, &bad, 60.0f, 40.0f, 1.0f, true, &r));
+    bad = c;
+    bad.output_max = INFINITY;
+    CHECK(!dc_pid_step(&s, &bad, 60.0f, 40.0f, 1.0f, true, &r));
 
     /* PI, P-only, and I-only controllers naturally disable derivative
      * filtering with kd=0 and derivative_alpha=0. */
@@ -190,6 +215,13 @@ int main(void)
     CHECK(dc_pid_step(&s, &i_only, 10.0f, 0.0f, 1.0f, true, &r));
     CHECK(r.p == 0.0f && r.i > 0.0f && r.d == 0.0f);
 
+    dc_pid_config_t pd = c;
+    pd.ki = 0.0f;
+    dc_pid_reset(&s);
+    CHECK(dc_pid_step(&s, &pd, 10.0f, 0.0f, 1.0f, true, &r));
+    CHECK(dc_pid_step(&s, &pd, 10.0f, 1.0f, 1.0f, true, &r));
+    CHECK(r.p > 0.0f && r.i == 0.0f && r.d < 0.0f);
+
     dc_pid_config_t all_zero = i_only;
     all_zero.ki = 0.0f;
     dc_pid_reset(&s);
@@ -210,6 +242,15 @@ int main(void)
     dc_pid_reset(&s);
     CHECK(!dc_pid_step(&s, &bad, 10.0f, 0.0f, 1.0f, true, &r));
     CHECK(!s.initialized && r.output == 0.0f);
+    bad = c;
+    bad.derivative_alpha = -0.1f;
+    CHECK(!dc_pid_step(&s, &bad, 10.0f, 0.0f, 1.0f, true, &r));
+    bad = c;
+    bad.derivative_alpha = 1.1f;
+    CHECK(!dc_pid_step(&s, &bad, 10.0f, 0.0f, 1.0f, true, &r));
+    bad = c;
+    bad.derivative_alpha = INFINITY;
+    CHECK(!dc_pid_step(&s, &bad, 10.0f, 0.0f, 1.0f, true, &r));
 
     /* Reverse/mixed-action gains are outside the direct-action contract. */
     bad = c;
@@ -220,6 +261,15 @@ int main(void)
     CHECK(!dc_pid_step(&s, &bad, 10.0f, 0.0f, 1.0f, true, &r));
     bad = c;
     bad.kd = -0.01f;
+    CHECK(!dc_pid_step(&s, &bad, 10.0f, 0.0f, 1.0f, true, &r));
+    bad = c;
+    bad.kp = NAN;
+    CHECK(!dc_pid_step(&s, &bad, 10.0f, 0.0f, 1.0f, true, &r));
+    bad = c;
+    bad.ki = INFINITY;
+    CHECK(!dc_pid_step(&s, &bad, 10.0f, 0.0f, 1.0f, true, &r));
+    bad = c;
+    bad.kd = NAN;
     CHECK(!dc_pid_step(&s, &bad, 10.0f, 0.0f, 1.0f, true, &r));
 
     /* Integral limits must contain reset value zero. Equal [0,0] limits are
@@ -236,6 +286,12 @@ int main(void)
     bad.integral_min = 0.5f;
     bad.integral_max = -0.5f;
     CHECK(!dc_pid_step(&s, &bad, 10.0f, 0.0f, 1.0f, true, &r));
+    bad = pi;
+    bad.integral_min = NAN;
+    CHECK(!dc_pid_step(&s, &bad, 10.0f, 0.0f, 1.0f, true, &r));
+    bad = pi;
+    bad.integral_max = INFINITY;
+    CHECK(!dc_pid_step(&s, &bad, 10.0f, 0.0f, 1.0f, true, &r));
 
     dc_pid_config_t pinned_i = pi;
     pinned_i.integral_min = 0.0f;
@@ -243,6 +299,32 @@ int main(void)
     dc_pid_reset(&s);
     CHECK(dc_pid_step(&s, &pinned_i, 10.0f, 0.0f, 1.0f, true, &r));
     CHECK(s.integral == 0.0f && r.i == 0.0f);
+
+    /* A restored state or runtime bounds change may leave the prior integral
+     * outside the active limits. Every successful step normalizes it, even if
+     * conditional anti-windup rejects the new candidate. */
+    dc_pid_config_t tightened_i = pi;
+    tightened_i.kp = 1.0f;
+    tightened_i.ki = 0.1f;
+    tightened_i.output_min = -0.4f;
+    tightened_i.output_max = 0.4f;
+    tightened_i.integral_min = -0.5f;
+    tightened_i.integral_max = 0.5f;
+
+    s = (dc_pid_state_t){ .integral = 1.0f };
+    CHECK(dc_pid_step(&s, &tightened_i, 1.0f, 0.0f, 1.0f, true, &r));
+    CHECK(s.integral == tightened_i.integral_max);
+    CHECK(r.i == tightened_i.integral_max);
+
+    s = (dc_pid_state_t){ .integral = -1.0f };
+    CHECK(dc_pid_step(&s, &tightened_i, -1.0f, 0.0f, 1.0f, true, &r));
+    CHECK(s.integral == tightened_i.integral_min);
+    CHECK(r.i == tightened_i.integral_min);
+
+    s = (dc_pid_state_t){ .integral = 1.0f };
+    CHECK(dc_pid_step(&s, &tightened_i, 0.0f, 0.0f, 1.0f, false, &r));
+    CHECK(s.integral == tightened_i.integral_max);
+    CHECK(r.i == tightened_i.integral_max);
 
     /* Saturation flags report actual clamping, not exact equality at a rail. */
     dc_pid_config_t rails = all_zero;
