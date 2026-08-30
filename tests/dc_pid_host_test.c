@@ -27,6 +27,15 @@ static void check_result_zero(const dc_pid_result_t *result)
     CHECK(!result->saturated_high);
 }
 
+static void check_integral_bounded(const dc_pid_state_t *state,
+                                   const dc_pid_config_t *config,
+                                   const dc_pid_result_t *result)
+{
+    CHECK(state->integral >= config->integral_min);
+    CHECK(state->integral <= config->integral_max);
+    CHECK(result->i == state->integral);
+}
+
 int main(void)
 {
     dc_pid_config_t c = {
@@ -300,6 +309,12 @@ int main(void)
     CHECK(dc_pid_step(&s, &pinned_i, 10.0f, 0.0f, 1.0f, true, &r));
     CHECK(s.integral == 0.0f && r.i == 0.0f);
 
+    /* [0,0] also normalizes a finite restored integral before integration. */
+    s = (dc_pid_state_t){ .integral = 0.25f };
+    CHECK(dc_pid_step(&s, &pinned_i, 10.0f, 0.0f, 1.0f, true, &r));
+    CHECK(s.integral == 0.0f && r.i == 0.0f);
+    check_integral_bounded(&s, &pinned_i, &r);
+
     /* A restored state or runtime bounds change may leave the prior integral
      * outside the active limits. Every successful step normalizes it, even if
      * conditional anti-windup rejects the new candidate. */
@@ -315,16 +330,43 @@ int main(void)
     CHECK(dc_pid_step(&s, &tightened_i, 1.0f, 0.0f, 1.0f, true, &r));
     CHECK(s.integral == tightened_i.integral_max);
     CHECK(r.i == tightened_i.integral_max);
+    check_integral_bounded(&s, &tightened_i, &r);
 
     s = (dc_pid_state_t){ .integral = -1.0f };
     CHECK(dc_pid_step(&s, &tightened_i, -1.0f, 0.0f, 1.0f, true, &r));
     CHECK(s.integral == tightened_i.integral_min);
     CHECK(r.i == tightened_i.integral_min);
+    check_integral_bounded(&s, &tightened_i, &r);
 
     s = (dc_pid_state_t){ .integral = 1.0f };
     CHECK(dc_pid_step(&s, &tightened_i, 0.0f, 0.0f, 1.0f, false, &r));
     CHECK(s.integral == tightened_i.integral_max);
     CHECK(r.i == tightened_i.integral_max);
+    check_integral_bounded(&s, &tightened_i, &r);
+
+    /* Tightening limits at runtime makes the new config authoritative. The
+     * anti-windup gate may reject the candidate, but not the normalization. */
+    dc_pid_config_t wide_i = tightened_i;
+    wide_i.kp = 0.0f;
+    wide_i.ki = 0.75f;
+    wide_i.output_min = -2.0f;
+    wide_i.output_max = 2.0f;
+    wide_i.integral_min = -1.0f;
+    wide_i.integral_max = 1.0f;
+    dc_pid_reset(&s);
+    CHECK(dc_pid_step(&s, &wide_i, 1.0f, 0.0f, 1.0f, true, &r));
+    CHECK(s.integral == 0.75f);
+    check_integral_bounded(&s, &wide_i, &r);
+
+    dc_pid_config_t runtime_tightened_i = wide_i;
+    runtime_tightened_i.output_min = -0.2f;
+    runtime_tightened_i.output_max = 0.2f;
+    runtime_tightened_i.integral_min = -0.25f;
+    runtime_tightened_i.integral_max = 0.25f;
+    CHECK(dc_pid_step(&s, &runtime_tightened_i,
+                      1.0f, 0.0f, 1.0f, true, &r));
+    CHECK(s.integral == runtime_tightened_i.integral_max);
+    check_integral_bounded(&s, &runtime_tightened_i, &r);
 
     /* Saturation flags report actual clamping, not exact equality at a rail. */
     dc_pid_config_t rails = all_zero;
