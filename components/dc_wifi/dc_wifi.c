@@ -32,10 +32,11 @@ static const char *TAG = "dc_wifi";
 #define KEY_AP_EN   "ap_enabled"   // legacy bool, migrated to KEY_AP_MODE
 #define KEY_AP_MODE "ap_mode"      // u8 dc_wifi_ap_mode_t
 
-// ~4 s per attempt, so 20 retries ≈ 80 s of trying before falling back to the
-// portal — enough to ride out a mesh roam or a router reboot (was 5 ≈ 20 s,
-// which gave up too fast in multi-AP/mesh networks).
-#define STA_MAX_RETRIES  20
+// ~4 s per attempt. The CONSTRAINED profile tries 20 (≈ 80 s) to ride out a flaky
+// mesh node before falling back to the portal; STANDARD uses the original 5 (≈ 20 s),
+// enough for a healthy radio and quick to surface a real credential problem.
+#define STA_MAX_RETRIES_STANDARD     5
+#define STA_MAX_RETRIES_CONSTRAINED  20
 #define BIT_CONNECTED    BIT0
 #define BIT_FAILED       BIT1
 
@@ -49,7 +50,16 @@ static esp_timer_handle_t s_ap_temp_timer = NULL;   // TEMP-mode AP shutdown
 static esp_timer_handle_t s_no_ip_timer   = NULL;   // "associated but no DHCP IP" watchdog
 #define NO_IP_TIMEOUT_US  (5ULL * 1000000ULL)       // 5s to get a DHCP lease, else drop & re-scan
 static int s_retry = 0;
+// Radio tuning profile (see dc_wifi.h). Default STANDARD reproduces the pre-0.30
+// STA behavior; products with a weak antenna call dc_wifi_set_radio_profile().
+static dc_wifi_radio_profile_t s_radio = DC_WIFI_RADIO_STANDARD;
 static bool s_mdns_started = false;
+
+static inline bool radio_constrained(void) { return s_radio == DC_WIFI_RADIO_CONSTRAINED; }
+static inline int  sta_max_retries(void)
+{
+    return radio_constrained() ? STA_MAX_RETRIES_CONSTRAINED : STA_MAX_RETRIES_STANDARD;
+}
 static char s_hostname[33] = DC_WIFI_DEFAULT_HOSTNAME;
 static char s_instance_name[64] = DC_WIFI_DEFAULT_INSTANCE_NAME;
 static char s_ap_ssid_prefix[29] = DC_WIFI_DEFAULT_AP_SSID_PREFIX;
@@ -436,11 +446,11 @@ static void start_sta_mode(const char *ssid, const char *pass)
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &sta));
     s_state = DC_WIFI_STATE_STA_CONNECTING;
     ESP_ERROR_CHECK(esp_wifi_start());
-    // Keep the radio awake: with modem power-save on, the chip sleeps between
-    // beacons and can miss the DHCP OFFER/ACK — associating fine but never
-    // getting an IP (seen on the C3 in a mesh). Small power cost on a
-    // mains-powered device; big reliability win.
-    esp_wifi_set_ps(WIFI_PS_NONE);
+    // CONSTRAINED profile keeps the radio fully awake: with modem power-save on, the
+    // chip sleeps between beacons and can miss the DHCP OFFER/ACK — associating fine
+    // but never getting an IP (seen on the C3 SuperMini in a mesh). STANDARD keeps the
+    // stock MIN_MODEM power-save, which a healthy radio handles fine.
+    esp_wifi_set_ps(radio_constrained() ? WIFI_PS_NONE : WIFI_PS_MIN_MODEM);
 }
 
 // Bring up STA and the AP together (APSTA) for AP modes ALWAYS/TEMP when STA
@@ -467,7 +477,8 @@ static void start_sta_ap_mode(const char *ssid, const char *pass,
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap));
     s_state = DC_WIFI_STATE_STA_CONNECTING;
     ESP_ERROR_CHECK(esp_wifi_start());
-    esp_wifi_set_ps(WIFI_PS_NONE);   // no modem sleep — don't miss DHCP frames
+    // See start_sta_mode: CONSTRAINED disables modem sleep so DHCP frames aren't missed.
+    esp_wifi_set_ps(radio_constrained() ? WIFI_PS_NONE : WIFI_PS_MIN_MODEM);
     log_ap_up(ap_cfg);
 }
 
@@ -498,16 +509,18 @@ static void on_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *da
         // Only auto-connect if we're actually trying to be a station.
         if (s_state == DC_WIFI_STATE_STA_CONNECTING) esp_wifi_connect();
     } else if (id == WIFI_EVENT_STA_CONNECTED) {
-        // L2 associated — arm the no-DHCP-IP watchdog until GOT_IP fires.
-        no_ip_watch_start();
+        // L2 associated. CONSTRAINED arms the no-DHCP-IP watchdog until GOT_IP fires
+        // (drops a node that admits but won't lease); STANDARD relies on the driver's
+        // own association/DHCP timeout, matching pre-0.30 behavior.
+        if (radio_constrained()) no_ip_watch_start();
     } else if (id == WIFI_EVENT_STA_DISCONNECTED) {
         no_ip_watch_stop();
         const wifi_event_sta_disconnected_t *d = (const wifi_event_sta_disconnected_t *)data;
         if (d) s_last_disc_reason = d->reason;   // keep the latest reason for the setup page
         if (s_state == DC_WIFI_STATE_STA_CONNECTING || s_state == DC_WIFI_STATE_STA_CONNECTED) {
-            if (s_retry < STA_MAX_RETRIES) {
+            if (s_retry < sta_max_retries()) {
                 s_retry++;
-                ESP_LOGW(TAG, "STA disconnect; retry %d/%d", s_retry, STA_MAX_RETRIES);
+                ESP_LOGW(TAG, "STA disconnect; retry %d/%d", s_retry, sta_max_retries());
                 esp_wifi_connect();
             } else {
                 ESP_LOGW(TAG, "STA gave up; falling back to portal");
@@ -568,6 +581,18 @@ bool dc_wifi_last_sta_fail(char *ssid_out, size_t ssid_sz, char *reason_out, siz
 }
 
 // ---------- Public API ----------
+
+esp_err_t dc_wifi_set_radio_profile(dc_wifi_radio_profile_t profile)
+{
+    if (profile != DC_WIFI_RADIO_STANDARD && profile != DC_WIFI_RADIO_CONSTRAINED) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (s_state != DC_WIFI_STATE_INIT) {   // must be chosen before dc_wifi_start()
+        return ESP_ERR_INVALID_STATE;
+    }
+    s_radio = profile;
+    return ESP_OK;
+}
 
 esp_err_t dc_wifi_set_identity(const dc_wifi_identity_t *identity)
 {
@@ -648,12 +673,13 @@ esp_err_t dc_wifi_start(void)
         else
             start_sta_ap_mode(ssid, pass, &ap_cfg);
 
-        // Wait for a decision. With the ~5s no-IP watchdog cycling nodes, 45 s
-        // gives the STA ~7 association+DHCP attempts before we fall back to the
-        // portal — room to get past a mesh node that only leases intermittently.
+        // Wait for a decision before falling back to the portal. CONSTRAINED waits
+        // 45 s: with the ~5s no-IP watchdog cycling nodes that's ~7 association+DHCP
+        // attempts, room to get past a mesh node that only leases intermittently.
+        // STANDARD uses the original 30 s (no watchdog cycling to accommodate).
         EventBits_t bits = xEventGroupWaitBits(
             s_events, BIT_CONNECTED | BIT_FAILED, pdFALSE, pdFALSE,
-            pdMS_TO_TICKS(45000));
+            pdMS_TO_TICKS(radio_constrained() ? 45000 : 30000));
         if (bits & BIT_CONNECTED) {
             // STA up. TEMP closes the concurrent-AP window after the boot timer.
             if (ap_cfg.mode == DC_WIFI_AP_TEMP) schedule_ap_temp_shutdown();
