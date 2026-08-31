@@ -30,6 +30,9 @@ jobs:
       - name: Test console snapshot streaming
         run: tests/run_console_stream_host_test.sh
 
+      - name: Run generic PID tests
+        run: tests/run_pid_host_test.sh
+
       - name: Check family SPA syntax and capability contract
         run: node tests/check_ui.mjs
 
