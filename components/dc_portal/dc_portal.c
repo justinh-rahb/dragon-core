@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "dc_portal.h"
+#include "dc_portal_console_stream.h"
 #include "dc_portal_dns.h"
 
 #include <stdlib.h>
@@ -326,17 +327,18 @@ static esp_err_t logs_get(httpd_req_t *req)
 // so each product owns its own /diag page.)
 
 // Raw firmware console ring (auth-gated), the data source for /console.
+static esp_err_t console_send_chunk(void *ctx, const char *data, size_t len)
+{
+    return httpd_resp_send_chunk((httpd_req_t *)ctx, data, len);
+}
+
 static esp_err_t console_data_get(httpd_req_t *req)
 {
     if (require_auth(req) != ESP_OK) return ESP_OK;
-    char *buf = malloc(DC_EVLOG_CONSOLE_BYTES + 1);
-    if (!buf) return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "out of memory");
-    size_t n = dc_evlog_console_snapshot(buf, DC_EVLOG_CONSOLE_BYTES + 1);
+
     httpd_resp_set_type(req, "text/plain; charset=utf-8");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-    esp_err_t err = httpd_resp_send(req, buf, n);
-    free(buf);
-    return err;
+    return dc_portal_console_stream(req, console_send_chunk);
 }
 
 // Compact, theme-aware page shell for /console. Mirrors the
