@@ -83,9 +83,33 @@ static esp_err_t require_auth(httpd_req_t *req)
 static esp_err_t spa_get(httpd_req_t *req)
 {
     dc_ui_asset_t asset = dc_ui_spa_asset();
+
+    // Cache the SPA with an ETag tied to the firmware build (the app's ELF
+    // SHA-256). "no-cache" lets the browser store it but revalidate every load;
+    // an unchanged build answers with a tiny 304 instead of re-downloading the
+    // whole gzipped SPA — a big win on a weak/slow link — while an OTA changes
+    // the ETag so the new UI is picked up immediately.
+    char etag[20] = "\"0000000000000000\"";
+    const esp_app_desc_t *desc = esp_app_get_description();
+    if (desc) {
+        for (int i = 0; i < 8; i++)
+            snprintf(etag + 1 + i * 2, 3, "%02x", desc->app_elf_sha256[i]);
+        etag[17] = '"';
+    }
+
+    char inm[24] = {0};
+    if (httpd_req_get_hdr_value_str(req, "If-None-Match", inm, sizeof(inm)) == ESP_OK
+        && strcmp(inm, etag) == 0) {
+        httpd_resp_set_status(req, "304 Not Modified");
+        httpd_resp_set_hdr(req, "ETag", etag);
+        httpd_resp_set_hdr(req, "Cache-Control", "no-cache");
+        return httpd_resp_send(req, NULL, 0);
+    }
+
     httpd_resp_set_type(req, asset.content_type);
     httpd_resp_set_hdr(req, "Content-Encoding", asset.content_encoding);
-    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    httpd_resp_set_hdr(req, "ETag", etag);
+    httpd_resp_set_hdr(req, "Cache-Control", "no-cache");
     return httpd_resp_send(req, (const char *)asset.data, asset.len);
 }
 
