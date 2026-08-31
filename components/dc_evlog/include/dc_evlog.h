@@ -44,8 +44,11 @@ size_t dc_evlog_snapshot(dc_evlog_entry_t *out, size_t max);
 // never logs from within the hook (no recursion).
 void dc_evlog_console_init(void);
 
-// Copy the console ring, oldest -> newest, into `out` (always NUL-terminated).
-// Returns bytes written (excluding the NUL). `max` should be >= the ring size + 1.
+// Compatibility API for callers that need one atomic oldest -> newest copy of
+// the console ring. `out` is always NUL-terminated and the return value excludes
+// that NUL. The caller owns the storage; callers requesting the complete ring
+// should avoid placing such a large buffer on a constrained task stack. Streaming
+// HTTP paths should prefer the bounded snapshot-view API below.
 size_t dc_evlog_console_snapshot(char *out, size_t max);
 
 // Bounded-memory console snapshot view for streaming callers. `begin` captures a

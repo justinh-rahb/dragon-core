@@ -17,8 +17,9 @@ static size_t            s_count = 0;  // number of valid entries (<= MAX)
 // ---- firmware console capture (raw ESP_LOGx byte ring) ----
 // Independent of the curated event ring above. A spinlock (not a mutex) guards it
 // because the esp_log vprintf hook can be reached from many contexts and must never
-// block or assert; the critical sections are a short append (<=CON_LINE bytes) and
-// a rarely-called snapshot copy. We NEVER log from inside the hook.
+// block or assert. Appends and bounded snapshot reads use short critical sections;
+// no console lock is ever held across caller or network I/O. We NEVER log from
+// inside the hook.
 #define CON_LINE  200
 static portMUX_TYPE     s_con_mux = portMUX_INITIALIZER_UNLOCKED;
 static char             s_con[DC_EVLOG_CONSOLE_BYTES];

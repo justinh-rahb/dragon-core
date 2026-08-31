@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "dc_portal.h"
+#include "dc_portal_console_stream.h"
 #include "dc_portal_dns.h"
 
 #include <stdlib.h>
@@ -302,38 +303,18 @@ static esp_err_t logs_get(httpd_req_t *req)
 // so each product owns its own /diag page.)
 
 // Raw firmware console ring (auth-gated), the data source for /console.
+static esp_err_t console_send_chunk(void *ctx, const char *data, size_t len)
+{
+    return httpd_resp_send_chunk((httpd_req_t *)ctx, data, len);
+}
+
 static esp_err_t console_data_get(httpd_req_t *req)
 {
     if (require_auth(req) != ESP_OK) return ESP_OK;
 
-    char buf[1024];
-    dc_evlog_console_view_t view;
-    size_t offset = 0;
-    size_t n = dc_evlog_console_snapshot_begin(&view, buf, sizeof(buf));
-
     httpd_resp_set_type(req, "text/plain; charset=utf-8");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-
-    if (n > 0) {
-        esp_err_t err = httpd_resp_send_chunk(req, buf, n);
-        if (err != ESP_OK) return err;
-        offset = n;
-    }
-
-    while (offset < view.len) {
-        if (!dc_evlog_console_snapshot_read(&view, offset, buf, sizeof(buf), &n)) {
-            // The unread portion was overwritten. Abort the response rather than
-            // append bytes from a different logical snapshot.
-            return ESP_FAIL;
-        }
-        if (n == 0) return ESP_FAIL;
-
-        esp_err_t err = httpd_resp_send_chunk(req, buf, n);
-        if (err != ESP_OK) return err;
-        offset += n;
-    }
-
-    return httpd_resp_send_chunk(req, NULL, 0);
+    return dc_portal_console_stream(req, console_send_chunk);
 }
 
 // Compact, theme-aware page shell for /console. Mirrors the
