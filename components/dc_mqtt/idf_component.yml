@@ -1,4 +1,4 @@
-version: "0.30.0"
+version: "0.32.0"
 description: Shared MQTT session lifecycle for Dragon-family firmware
 license: MIT
 dependencies:
