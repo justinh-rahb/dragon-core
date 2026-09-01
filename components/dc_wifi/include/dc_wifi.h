@@ -79,6 +79,25 @@ typedef struct {
 bool dc_wifi_ssid_valid(const char *ssid, bool allow_empty);
 bool dc_wifi_password_valid(const char *password);
 
+// Radio tuning profile. STANDARD is stock ESP-IDF STA behavior — modem power-save
+// on, a short connect-retry budget, and no DHCP-lease watchdog — and is correct for
+// products with a normal antenna (DragonBreath, DragonVent). CONSTRAINED hardens the
+// STA path for the ESP32-C3 SuperMini's weak PCB antenna and mesh-DHCP flakiness:
+// modem power-save off (so the radio can't sleep through a DHCP OFFER/ACK), a
+// no-DHCP-IP watchdog that drops a node which associates but never leases and re-scans,
+// and a longer retry/boot budget to ride out a flaky mesh node. These knobs help a
+// weak-antenna board but are counterproductive on a healthy radio (needless power
+// draw, and the watchdog can bump a node that would have leased a beat later), so
+// only the SuperMini opts in.
+typedef enum {
+    DC_WIFI_RADIO_STANDARD    = 0,  // normal antenna (default)
+    DC_WIFI_RADIO_CONSTRAINED = 1,  // ESP32-C3 SuperMini / weak antenna
+} dc_wifi_radio_profile_t;
+
+// Select the radio tuning profile. Must be called before dc_wifi_start(); the
+// default is DC_WIFI_RADIO_STANDARD.
+esp_err_t dc_wifi_set_radio_profile(dc_wifi_radio_profile_t profile);
+
 // Start the WiFi manager. Non-blocking; state transitions happen async.
 esp_err_t dc_wifi_start(void);
 
