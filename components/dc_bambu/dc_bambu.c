@@ -308,30 +308,59 @@ static void mqtt_event_handler(void *args, esp_event_base_t base, int32_t id, vo
 
 // ---------- lifecycle ----------
 
-esp_err_t dc_bambu_start(void)
+static void status_reset(dc_bambu_state_t state)
 {
-    if (s_lock != NULL) return ESP_ERR_INVALID_STATE;
-    s_lock = xSemaphoreCreateMutex();
-    if (s_lock == NULL) return ESP_ERR_NO_MEM;
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    s_status = (dc_bambu_status_t){
+        .state = state,
+        .bed_temp = NAN,
+        .bed_target = NAN,
+        .chamber_temp = NAN,
+        .chamber_temp_age_ms = UINT32_MAX,
+        .progress = -1,
+    };
+    s_chamber_temp_us = 0;
+    xSemaphoreGive(s_lock);
+}
 
-    if (nvs_load(&s_cfg) != ESP_OK || s_cfg.host[0] == '\0') {
+static void client_stop(void)
+{
+    if (s_client != NULL) {
+        esp_mqtt_client_stop(s_client);
+        esp_mqtt_client_destroy(s_client);
+        s_client = NULL;
+    }
+    free(s_rx);
+    s_rx = NULL;
+    s_rx_len = 0;
+    s_in_report = false;
+}
+
+static esp_err_t client_start(void)
+{
+    dc_bambu_config_t cfg;
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    cfg = s_cfg;
+    xSemaphoreGive(s_lock);
+
+    if (cfg.host[0] == '\0') {
         ESP_LOGI(TAG, "no Bambu config saved; idle");
-        s_status.state = DC_BAMBU_DISABLED;
+        status_reset(DC_BAMBU_DISABLED);
         return ESP_OK;
     }
-    if (s_cfg.serial[0] == '\0' || s_cfg.code[0] == '\0') {
+    if (cfg.serial[0] == '\0' || cfg.code[0] == '\0') {
         ESP_LOGW(TAG, "Bambu needs host + serial + access code; idle");
-        s_status.state = DC_BAMBU_DISABLED;
+        status_reset(DC_BAMBU_DISABLED);
         return ESP_OK;
     }
 
     s_rx = malloc(RX_CAP);
     if (s_rx == NULL) return ESP_ERR_NO_MEM;
-    snprintf(s_report_topic,  sizeof s_report_topic,  "device/%s/report",  s_cfg.serial);
-    snprintf(s_request_topic, sizeof s_request_topic, "device/%s/request", s_cfg.serial);
+    snprintf(s_report_topic,  sizeof s_report_topic,  "device/%s/report",  cfg.serial);
+    snprintf(s_request_topic, sizeof s_request_topic, "device/%s/request", cfg.serial);
 
     char uri[96];
-    snprintf(uri, sizeof uri, "mqtts://%s:8883", s_cfg.host);
+    snprintf(uri, sizeof uri, "mqtts://%s:8883", cfg.host);
     esp_mqtt_client_config_t mc = {
         .broker.address.uri = uri,
         // Self-signed per-device cert (CN=serial) reached by IP: no CA to verify
@@ -343,7 +372,7 @@ esp_err_t dc_bambu_start(void)
         .broker.verification.skip_cert_common_name_check = true,
         .broker.verification.use_global_ca_store = false,
         .credentials.username = "bblp",
-        .credentials.authentication.password = s_cfg.code,
+        .credentials.authentication.password = cfg.code,
         .buffer.size = MQTT_BUF,
     };
 
@@ -351,18 +380,41 @@ esp_err_t dc_bambu_start(void)
     if (s_client == NULL) {
         ESP_LOGE(TAG, "esp_mqtt_client_init failed");
         free(s_rx); s_rx = NULL;
-        s_status.state = DC_BAMBU_DISCONNECTED;
+        status_reset(DC_BAMBU_DISCONNECTED);
         return ESP_FAIL;
     }
     esp_mqtt_client_register_event(s_client, ESP_EVENT_ANY_ID, mqtt_event_handler, NULL);
     esp_err_t err = esp_mqtt_client_start(s_client);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "esp_mqtt_client_start: %s", esp_err_to_name(err));
-        s_status.state = DC_BAMBU_DISCONNECTED;
+        esp_mqtt_client_destroy(s_client);
+        s_client = NULL;
+        free(s_rx); s_rx = NULL;
+        status_reset(DC_BAMBU_DISCONNECTED);
         return err;
     }
-    s_status.state = DC_BAMBU_CONNECTING;
+    status_reset(DC_BAMBU_CONNECTING);
     ESP_LOGI(TAG, "connecting to %s", uri);
+    return ESP_OK;
+}
+
+esp_err_t dc_bambu_start(void)
+{
+    if (s_lock == NULL) {
+        s_lock = xSemaphoreCreateMutex();
+        if (s_lock == NULL) return ESP_ERR_NO_MEM;
+        dc_bambu_config_t saved = {0};
+        if (nvs_load(&saved) == ESP_OK) s_cfg = saved;
+    }
+    if (s_client != NULL) return ESP_OK;
+    return client_start();
+}
+
+esp_err_t dc_bambu_stop(void)
+{
+    if (s_lock == NULL) return ESP_OK;
+    client_stop();
+    status_reset(DC_BAMBU_DISABLED);
     return ESP_OK;
 }
 
@@ -371,6 +423,8 @@ esp_err_t dc_bambu_set_config(const dc_bambu_config_t *cfg)
     if (cfg == NULL) return ESP_ERR_INVALID_ARG;
     esp_err_t err = nvs_save(cfg);
     if (err != ESP_OK) return err;
+    bool reconnect = s_client != NULL;
+    if (reconnect) client_stop();
     if (s_lock) {
         xSemaphoreTake(s_lock, portMAX_DELAY);
         s_cfg = *cfg;
@@ -378,7 +432,7 @@ esp_err_t dc_bambu_set_config(const dc_bambu_config_t *cfg)
     } else {
         s_cfg = *cfg;
     }
-    return ESP_OK;   // takes effect on next boot (matches dc_moonraker semantics)
+    return reconnect ? client_start() : ESP_OK;
 }
 
 esp_err_t dc_bambu_get_config(dc_bambu_config_t *out)
@@ -433,6 +487,7 @@ esp_err_t dc_bambu_get_status(dc_bambu_status_t *out)
 
 esp_err_t dc_bambu_clear_config(void)
 {
+    if (s_lock) client_stop();
     nvs_handle_t h;
     esp_err_t err = nvs_open(NVS_NS, NVS_READWRITE, &h);
     if (err != ESP_OK) return err;
@@ -445,6 +500,7 @@ esp_err_t dc_bambu_clear_config(void)
         xSemaphoreTake(s_lock, portMAX_DELAY);
         memset(&s_cfg, 0, sizeof(s_cfg));
         xSemaphoreGive(s_lock);
+        status_reset(DC_BAMBU_DISABLED);
     } else {
         memset(&s_cfg, 0, sizeof(s_cfg));
     }

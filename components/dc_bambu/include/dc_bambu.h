@@ -54,9 +54,11 @@ typedef struct {
 } dc_bambu_status_t;
 
 esp_err_t dc_bambu_start(void);
+// Stop the active MQTT client. Safe to call when already stopped.
+esp_err_t dc_bambu_stop(void);
 
-// Overwrite saved config (NVS). Safe before dc_bambu_start(); the running client
-// (once implemented) will reconnect with the new settings.
+// Overwrite saved config (NVS). If the client is running, reconnect immediately
+// with the new settings; otherwise the config is used by the next start.
 esp_err_t dc_bambu_set_config(const dc_bambu_config_t *cfg);
 
 // Returns persisted config even when dc_bambu_start() has not been called.
