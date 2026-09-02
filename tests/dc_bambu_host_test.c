@@ -54,6 +54,18 @@ static void expect_print_error(const char *json, int want_found, uint32_t want_c
            want_found, (unsigned)want_code, got_found, (unsigned)got_code);
 }
 
+static void expect_next_error(const char *name, uint32_t current, int got_phase,
+                              dc_bambu_gcode_phase_t phase, int got_code,
+                              uint32_t incoming, uint32_t want)
+{
+    uint32_t got = dc_bambu_next_print_error_code(
+        current, got_phase, phase, got_code, incoming);
+    int ok = got == want;
+    if (!ok) fails++;
+    printf("[%s] next-error %-20s want=%u got=%u\n", ok ? "PASS" : "FAIL",
+           name, (unsigned)want, (unsigned)got);
+}
+
 
 static void expect_chamber_fresh(const char *name, int64_t now_us,
                                  int64_t sample_us, int want)
@@ -176,6 +188,21 @@ int main(void)
     expect_print_error("{\"print\":{\"print_error\":1234}}", 1, 1234);
     expect_print_error("{\"print\":{\"print_error\":\"0x04D2\"}}", 1, 1234);
     expect_print_error("{\"print\":{}}", 0, 0);
+    expect_print_error("{\"history\":{\"print_error\":77},\"print\":{\"print_error\":12}}", 1, 12);
+    expect_print_error("{\"print\":{\"history\":{\"print_error\":77}}}", 0, 0);
+    expect_print_error("{\"print\":{\"print_error\":4294967296}}", 0, 0);
+    expect_print_error("{\"print\":{\"print_error\":\"1234junk\"}}", 0, 0);
+
+    // A new active/idle phase clears an omitted stale error. FAILED without a
+    // new code retains a genuine fault; an explicit zero clears it.
+    expect_next_error("RUNNING clears stale", 1234, 1,
+                      DC_BAMBU_GCODE_PRINTING, 0, 0, 0);
+    expect_next_error("IDLE clears stale", 1234, 1,
+                      DC_BAMBU_GCODE_IDLE, 0, 0, 0);
+    expect_next_error("FAILED retains", 1234, 1,
+                      DC_BAMBU_GCODE_ERROR, 0, 0, 1234);
+    expect_next_error("explicit zero", 1234, 1,
+                      DC_BAMBU_GCODE_ERROR, 1, 0, 0);
 
     printf(fails ? "\n%d FAILED\n" : "\nALL PASS\n", fails);
     return fails ? 1 : 0;
