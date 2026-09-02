@@ -48,6 +48,25 @@ static inline dc_bambu_gcode_phase_t dc_bambu_gcode_phase(const char *state)
     return DC_BAMBU_GCODE_UNKNOWN;
 }
 
+// Bambu's print_error can be a JSON number or a quoted decimal/hex token.
+// A zero code is important: Bambu also emits FAILED when the user deliberately
+// stops a print, which should return to idle rather than report a printer fault.
+static inline bool dc_bambu_print_error_code(const char *json, uint32_t *out)
+{
+    const char *q = strstr(json, "\"print_error\"");
+    if (!q) return false;
+    q = strchr(q, ':');
+    if (!q) return false;
+    q++;
+    while (*q == ' ' || *q == '\t' || *q == '\n' || *q == '\r') q++;
+    if (*q == '"') q++;
+    char *end = NULL;
+    unsigned long value = strtoul(q, &end, 0);
+    if (end == q) return false;
+    if (out) *out = (uint32_t)value;
+    return true;
+}
+
 // Copy the string value of a JSON key ("key":"value") into out. `key` includes the
 // quotes. Returns true if a (possibly empty) string value was found.
 static inline bool dc_bambu_find_string(const char *s, const char *key, char *out, size_t outsz)

@@ -54,6 +54,7 @@ static const char *TAG = "dc_bambu";
 // print object, so a truncated tail still yields the follow signal).
 #define MQTT_BUF   8192
 #define RX_CAP     16384
+#define COMPLETION_HOLD_US 7500000LL
 
 // One pushall on connect; required on P1/A1 (delta-only), harmless on X1.
 static const char PUSHALL[] =
@@ -73,6 +74,11 @@ static char  *s_rx = NULL;                 // RX_CAP reassembly buffer
 static size_t s_rx_len = 0;
 static bool   s_in_report = false;         // current inbound msg is on the report topic
 static int64_t s_chamber_temp_us = 0;      // monotonic timestamp of last chamber_temper sample
+static dc_bambu_gcode_phase_t s_gcode_phase = DC_BAMBU_GCODE_UNKNOWN;
+static uint32_t s_print_error_code = 0;
+static bool s_has_observed_active_job = false;
+static bool s_completion_visible = false;
+static int64_t s_completion_until_us = 0;
 
 // ---------- NVS ----------
 
@@ -146,6 +152,8 @@ static void parse_report(const char *json)
     dc_fila_result_t fr = dc_bambu_active_filament(json, fila, sizeof fila);
     char gs[16];
     bool got_gs = dc_bambu_find_string(json, "\"gcode_state\"", gs, sizeof gs);  // print state
+    uint32_t print_error_code = 0;
+    bool got_print_error = dc_bambu_print_error_code(json, &print_error_code);
 
     xSemaphoreTake(s_lock, portMAX_DELAY);
     if (got_bed) {
@@ -160,17 +168,62 @@ static void parse_report(const char *json)
         s_status.chamber_temp_age_ms = 0;
     }
     if (got_percent) s_status.progress = percent < 0 ? 0 : percent > 100 ? 1 : percent / 100.0f;
-    if (got_gs) {
-        s_status.printing = dc_bambu_gcode_active(gs);   // keep prior if a delta omits it
-        s_status.error    = (strcmp(gs, "FAILED") == 0); // Bambu's print-failed state
-        switch (dc_bambu_gcode_phase(gs)) {
-        case DC_BAMBU_GCODE_IDLE:        s_status.print_state = DC_BAMBU_PRINT_IDLE; break;
+    if (got_gs) s_gcode_phase = dc_bambu_gcode_phase(gs);
+    if (got_print_error) s_print_error_code = print_error_code;
+    if (got_gs || got_print_error) {
+        s_status.printing = s_gcode_phase == DC_BAMBU_GCODE_PREPARING ||
+                            s_gcode_phase == DC_BAMBU_GCODE_PRINTING ||
+                            s_gcode_phase == DC_BAMBU_GCODE_PAUSED;
+        s_status.error = s_print_error_code != 0;
+        if (s_status.error) {
+            s_has_observed_active_job = false;
+            s_completion_visible = false;
+            s_completion_until_us = 0;
+            s_status.print_state = DC_BAMBU_PRINT_ERROR;
+        } else switch (s_gcode_phase) {
+        case DC_BAMBU_GCODE_IDLE:
+            s_has_observed_active_job = false;
+            s_completion_visible = false;
+            s_completion_until_us = 0;
+            s_status.print_state = DC_BAMBU_PRINT_IDLE;
+            break;
         case DC_BAMBU_GCODE_DOWNLOADING: s_status.print_state = DC_BAMBU_PRINT_DOWNLOADING; break;
         case DC_BAMBU_GCODE_PREPARING:   s_status.print_state = DC_BAMBU_PRINT_PREPARING; break;
-        case DC_BAMBU_GCODE_PRINTING:    s_status.print_state = DC_BAMBU_PRINT_PRINTING; break;
-        case DC_BAMBU_GCODE_PAUSED:      s_status.print_state = DC_BAMBU_PRINT_PAUSED; break;
-        case DC_BAMBU_GCODE_COMPLETE:    s_status.print_state = DC_BAMBU_PRINT_COMPLETE; break;
-        case DC_BAMBU_GCODE_ERROR:       s_status.print_state = DC_BAMBU_PRINT_ERROR; break;
+        case DC_BAMBU_GCODE_PRINTING:
+            s_has_observed_active_job = true;
+            s_completion_visible = false;
+            s_completion_until_us = 0;
+            s_status.print_state = DC_BAMBU_PRINT_PRINTING;
+            break;
+        case DC_BAMBU_GCODE_PAUSED:
+            s_has_observed_active_job = true;
+            s_completion_visible = false;
+            s_completion_until_us = 0;
+            s_status.print_state = DC_BAMBU_PRINT_PAUSED;
+            break;
+        case DC_BAMBU_GCODE_COMPLETE: {
+            int64_t now_us = esp_timer_get_time();
+            if (s_has_observed_active_job && !s_completion_visible) {
+                s_has_observed_active_job = false;
+                s_completion_visible = true;
+                s_completion_until_us = now_us + COMPLETION_HOLD_US;
+            }
+            if (s_completion_visible && now_us < s_completion_until_us) {
+                s_status.print_state = DC_BAMBU_PRINT_COMPLETE;
+            } else {
+                s_completion_visible = false;
+                s_completion_until_us = 0;
+                s_status.print_state = DC_BAMBU_PRINT_IDLE;
+            }
+            break;
+        }
+        case DC_BAMBU_GCODE_ERROR:
+            // Bambu uses FAILED with print_error=0 for a deliberate stop.
+            s_has_observed_active_job = false;
+            s_completion_visible = false;
+            s_completion_until_us = 0;
+            s_status.print_state = DC_BAMBU_PRINT_IDLE;
+            break;
         default:                          s_status.print_state = DC_BAMBU_PRINT_UNKNOWN; break;
         }
     }
@@ -352,9 +405,17 @@ esp_err_t dc_bambu_get_status(dc_bambu_status_t *out)
     if (s_lock) xSemaphoreTake(s_lock, portMAX_DELAY);
     *out = s_status;
     int64_t sample_us = s_chamber_temp_us;
+    int64_t completion_until_us = s_completion_until_us;
     if (s_lock) xSemaphoreGive(s_lock);
 
     int64_t now_us = esp_timer_get_time();
+    // X1 printers can leave gcode_state at FINISH indefinitely. Show completion
+    // briefly, then resolve that stale report to idle without another message.
+    if (out->print_state == DC_BAMBU_PRINT_COMPLETE &&
+        (completion_until_us <= 0 || now_us >= completion_until_us)) {
+        out->print_state = DC_BAMBU_PRINT_IDLE;
+        out->printing = false;
+    }
     if (sample_us <= 0 || !isfinite(out->chamber_temp)) {
         out->chamber_temp = NAN;
         out->chamber_temp_age_ms = UINT32_MAX;

@@ -48,7 +48,7 @@ typedef struct {
                           // "" if unknown. Feeds filament-based chamber zones.
     bool  printing;       // gcode_state is PREPARE/RUNNING/PAUSE (a print is active);
                           // gates when a filament zone is applied.
-    bool  error;          // gcode_state is FAILED (print failed / errored)
+    bool  error;          // nonzero print_error; FAILED with code 0 is a user stop
     float progress;       // mc_percent / 100, or -1 until the printer reports it
     dc_bambu_print_state_t print_state; // normalized MQTT gcode_state phase
 } dc_bambu_status_t;
