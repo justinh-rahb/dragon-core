@@ -1146,22 +1146,8 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
       <section class="vent-view vent-mode-page" data-vent-content="auto">
         <div>
           <h3>Automatic policy</h3>
-          <p class="set-note">Open while printing or when the bed is hot. Close after the printer is idle and the bed cools below the lower threshold.</p>
+          <p class="set-note">In Auto, the vent follows the printer: it seals during a print of a sealing filament (below) and while a configured DragonBreath is heating the chamber, then opens once the print is over and the heater is off. Enable Auto from the home screen.</p>
         </div>
-        <div class="vent-thresholds">
-          <div class="vent-threshold">
-            <label for="dv-open-range">Open at</label>
-            <output class="touch-value" id="dv-open-value">45 <span>°C</span></output>
-            <input class="form-range" id="dv-open-range" type="range" min="20" max="100" step="1" value="45">
-          </div>
-          <div class="vent-threshold">
-            <label for="dv-close-range">Close below</label>
-            <output class="touch-value" id="dv-close-value">35 <span>°C</span></output>
-            <input class="form-range" id="dv-close-range" type="range" min="10" max="90" step="1" value="35">
-          </div>
-        </div>
-        <button class="btn btn-primary btn-block" type="button" id="dv-auto-save"><svg class="icon"><use href="#i-refresh"/></svg> Save &amp; enable Auto</button>
-        <div class="mode-feedback" id="dv-auto-msg" role="status" aria-live="polite"></div>
 
         <div class="fil-card">
           <h3>Filament rules</h3>
@@ -2096,8 +2082,6 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     u('dv-version', s.firmware||'--');
     u('dv-footer-version', s.firmware||'—');
     u('dv-wifi', (w.state||'unknown')+(w.ip?' · '+w.ip:'')+(w.rssi!=null?' · '+w.rssi+' dBm':''));
-    if(pol.bed_open_c!=null){ $('dv-open-range').value=Math.round(pol.bed_open_c); u('dv-open-value',Math.round(pol.bed_open_c)+' °C'); }
-    if(pol.bed_close_c!=null){ $('dv-close-range').value=Math.round(pol.bed_close_c); u('dv-close-value',Math.round(pol.bed_close_c)+' °C'); }
     ['dv-open','dv-manual-open'].forEach(function(id){ var b=$(id); if(b) b.setAttribute('aria-pressed',String(s.mode==='manual'&&target==='open')); });
     ['dv-close','dv-manual-close'].forEach(function(id){ var b=$(id); if(b) b.setAttribute('aria-pressed',String(s.mode==='manual'&&target==='closed')); });
     $('dv-auto').setAttribute('aria-pressed',String(s.mode==='auto'));
@@ -3007,18 +2991,6 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     ventPost('/api/v2/filament',{rules:rules})
       .then(function(){ ventFlash('dv-fil-msg','Filament rules saved.','is-ok'); })
       .catch(function(j){ ventFlash('dv-fil-msg',(j&&j.message)||'Save failed.','is-error'); });
-  });
-  ['dv-open-range','dv-close-range'].forEach(function(id){
-    $(id).addEventListener('input',function(){ u(id.replace('-range','-value'),this.value+' °C'); });
-  });
-  $('dv-auto-save').addEventListener('click',function(){
-    var open=Number($('dv-open-range').value), close=Number($('dv-close-range').value);
-    if(open<=close){ ventFlash('dv-auto-msg','Open temperature must be higher than close temperature.','is-error'); return; }
-    ventFlash('dv-auto-msg','Saving policy…');
-    ventPost('/api/v2/settings',{api_version:2,bed_open_c:open,bed_close_c:close})
-      .then(function(){ return ventCommand('auto'); })
-      .then(function(){ ventFlash('dv-auto-msg','Automatic printer-following enabled.','is-ok'); })
-      .catch(function(j){ ventFlash('dv-auto-msg',(j&&j.message)||'Could not save policy.','is-error'); });
   });
 
   /* Device info -> the Maintenance panel. (The old header brand/tooltip was
