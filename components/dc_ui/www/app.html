@@ -2073,7 +2073,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     u('dv-position', running?'MOVING':ventTargetLabel(target));
     u('dv-headline', running?'Vent in motion':(target==='open'?'Airflow open':target==='closed'?'Chamber sealed':'Vent stopped'));
     u('dv-summary', s.mode==='auto'
-      ? 'Following printer activity (and DragonBreath, when configured) automatically.'
+      ? ('Following printer activity'+((s.dragonbreath||{}).configured?' and DragonBreath':'')+' automatically.')
       : 'Manual control is active. Select Auto to resume printer-following.');
     u('dv-mode-chip', (s.mode||'manual').toUpperCase()+' mode');
     u('dv-source', p.source||'standalone');
