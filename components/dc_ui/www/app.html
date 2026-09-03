@@ -8,6 +8,19 @@
 <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#181818" media="(prefers-color-scheme: dark)">
 <title>DragonBreath</title>
+<!-- DC_UI_STANDALONE_SETUP_FIRST_PAINT
+     /setup and /fw are standalone recovery surfaces. Mark them before the body
+     is parsed so the default DragonBreath dashboard can never paint underneath
+     the provisioning overlay. Hash-based #setup remains an in-app overlay. -->
+<script>
+(function(){
+  var p=location.pathname;
+  if(p==='/setup'||p==='/fw'){
+    document.documentElement.classList.add('dc-standalone-setup');
+    document.title=p==='/fw'?'Firmware Update':'Device Setup';
+  }
+})();
+</script>
 <!-- Favicon: the DragonBreath dragon mark, self-contained (URL-encoded inline SVG,
      no external requests). The SVG icon is theme-adaptive (charcoal on a light tab,
      white on a dark tab) via an embedded prefers-color-scheme rule. The browser's
@@ -16,6 +29,7 @@
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2032%2032'%3E%3Cstyle%3Epath%7Bfill:%2318181b%7D%40media(prefers-color-scheme:dark)%7Bpath%7Bfill:%23fff%7D%7D%3C/style%3E%3Cpath%20fill-rule='evenodd'%20d='M2%2015%20L8%2013%20L11%2011%20L13%208%20L15%2010%20L21%203%20L18%2011%20L21%2013%20L24%2015%20L28%2017%20L23%2018%20L27%2022%20L20%2020%20L18%2020%20L16%2019%20L3%2019%20Z%20M10%2012%20a1.4%201.4%200%20100%202.8%201.4%201.4%200%20000-2.8Z'/%3E%3C/svg%3E">
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2032%2032'%3E%3Crect%20width='32'%20height='32'%20rx='7'%20fill='%2318181b'/%3E%3Cg%20transform='translate(3.4%205.2)%20scale(0.8)'%20fill='%23fff'%3E%3Cpath%20fill-rule='evenodd'%20d='M2%2015%20L8%2013%20L11%2011%20L13%208%20L15%2010%20L21%203%20L18%2011%20L21%2013%20L24%2015%20L28%2017%20L23%2018%20L27%2022%20L20%2020%20L18%2020%20L16%2019%20L3%2019%20Z%20M10%2012%20a1.4%201.4%200%20100%202.8%201.4%201.4%200%20000-2.8Z'/%3E%3C/g%3E%3C/svg%3E">
 <style>
+html.dc-standalone-setup .app{display:none!important}
 /* ---- Charcoal Fluidd/Mainsail token system (light + dark via light-dark()).
    Lifted from the approved design prototype; do not depend on the old blue. ---- */
 :root{
@@ -2998,6 +3012,23 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
       .then(function(){ ventFlash('dv-auto-msg','Automatic printer-following enabled.','is-ok'); })
       .catch(function(j){ ventFlash('dv-auto-msg',(j&&j.message)||'Could not save policy.','is-error'); });
   });
+
+  /*
+   * DC_UI_STANDALONE_SETUP_CLOSE
+   *
+   * A standalone setup page has no dashboard underneath it. Return to "/" and
+   * let the product's root routing decide its correct landing page.
+   */
+  if(location.pathname==='/setup'||location.pathname==='/fw'){
+    var standaloneSetupClose=$('dc-setup-close');
+    if(standaloneSetupClose){
+      standaloneSetupClose.addEventListener('click',function(event){
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        location.href='/';
+      },true);
+    }
+  }
 
   /* Device info -> the Maintenance panel. (The old header brand/tooltip was
      removed; the firmware version is shown in the footer, populated in apply().) */
