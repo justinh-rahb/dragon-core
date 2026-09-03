@@ -1472,7 +1472,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
       if(field.min!=null)input.min=field.min; if(field.max!=null)input.max=field.max; if(field.step!=null)input.step=field.step;
       if(field.placeholder)input.placeholder=field.placeholder;
     }
-    input.dataset.setupKey=field.key; input.value=field.value==null?'':(field.type==='boolean'?(field.value?'1':'0'):String(field.value));
+    input.dataset.setupKey=field.key; input.value=field.type==='boolean'?((field.value===true||field.value===1||field.value==='1')?'1':'0'):(field.value==null?'':String(field.value));
     label.htmlFor='dc-field-'+field.key; input.id=label.htmlFor; wrap.appendChild(input);
     if(field.hint){var hint=document.createElement('small');hint.textContent=field.hint;wrap.appendChild(hint);}
     return wrap;
