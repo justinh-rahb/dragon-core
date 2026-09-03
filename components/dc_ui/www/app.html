@@ -496,6 +496,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
 .vent-actions .btn{ min-height:42px; gap:6px; }
 .vent-status{ display:flex; flex-direction:column; gap:8px; }
 .vent-status .status-detail{ margin-top:0; }
+.vent-status-col{ min-height:0; display:flex; flex-direction:column; gap:9px; }
 .vent-mode-page{ flex-direction:column; gap:12px; max-width:540px; width:100%; }
 .vent-choice{ display:grid; grid-template-columns:1fr 1fr; gap:8px; }
 .vent-choice .btn{ min-height:68px; flex-direction:column; gap:3px; }
@@ -1099,26 +1100,28 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
             </div>
           </article>
 
-          <article class="card vent-status">
-            <h3>Printer &amp; controller</h3>
-            <dl class="status-detail">
-              <div><dt>Source</dt><dd id="dv-source">--</dd></div>
-              <div><dt>Link</dt><dd id="dv-link">--</dd></div>
-              <div><dt>Printer</dt><dd id="dv-printer">--</dd></div>
-              <div><dt>Bed</dt><dd id="dv-bed">--</dd></div>
-              <div><dt>Material</dt><dd id="dv-material">--</dd></div>
-              <div><dt>Motor groups</dt><dd id="dv-groups">--</dd></div>
-            </dl>
-          </article>
+          <div class="vent-status-col">
+            <article class="card vent-status">
+              <h3>Printer &amp; controller</h3>
+              <dl class="status-detail">
+                <div><dt>Source</dt><dd id="dv-source">--</dd></div>
+                <div><dt>Link</dt><dd id="dv-link">--</dd></div>
+                <div><dt>Printer</dt><dd id="dv-printer">--</dd></div>
+                <div><dt>Bed</dt><dd id="dv-bed">--</dd></div>
+                <div><dt>Material</dt><dd id="dv-material">--</dd></div>
+                <div><dt>Motor groups</dt><dd id="dv-groups">--</dd></div>
+              </dl>
+            </article>
 
-          <article class="card vent-status" id="dv-breath-card" hidden>
-            <h3>DragonBreath <span class="muted">(info source)</span></h3>
-            <dl class="status-detail">
-              <div><dt>Link</dt><dd id="dv-breath-link">--</dd></div>
-              <div><dt>Heater</dt><dd id="dv-breath-heater">--</dd></div>
-              <div><dt>Chamber</dt><dd id="dv-breath-chamber">--</dd></div>
-            </dl>
-          </article>
+            <article class="card vent-status" id="dv-breath-card" hidden>
+              <h3>DragonBreath <span class="muted">(info source)</span></h3>
+              <dl class="status-detail">
+                <div><dt>Link</dt><dd id="dv-breath-link">--</dd></div>
+                <div><dt>Heater</dt><dd id="dv-breath-heater">--</dd></div>
+                <div><dt>Chamber</dt><dd id="dv-breath-chamber">--</dd></div>
+              </dl>
+            </article>
+          </div>
 
           <div class="vent-actions" aria-label="Quick vent actions">
             <button class="btn" type="button" id="dv-open"><svg class="icon"><use href="#i-wind"/></svg> Open</button>
