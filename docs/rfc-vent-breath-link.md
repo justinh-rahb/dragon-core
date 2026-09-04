@@ -2,6 +2,30 @@
 
 Status: **🔨 Accepted — implementing.** Design record; implementation in progress on `feat/vent-breath-link` (dragon-core `dc_breath_link` + `dc_ui`; DragonVent `dv_policy` + `dv_portal`).
 
+---
+
+> ### Implemented as (supersedes the transport below)
+>
+> The shipped V2 transport is **ESP-NOW push, not HTTP poll**. The `## Design` §1 poll
+> task, `<breath-address>` config, JSON parser, and HTTP client below are the **original,
+> superseded** design — the implementation uses the `dc_peer` capability plane (RFC 0003/0004):
+>
+> - **Transport:** the Breath *broadcasts* a heater capability over `dc_peer` (ESP-NOW); the
+>   Vent subscribes. Freshness is by local receipt time (same 150 s window). No HTTP, no address.
+> - **Same-channel only (known limitation).** ESP-NOW reaches only peers on the current Wi-Fi
+>   channel. Devices joined to different mesh nodes/APs on different channels will **not** discover
+>   one another. There is no HTTP/mDNS cross-channel fallback; the product promise is narrowed to
+>   same-channel discovery. (Cross-channel fallback is possible future work.)
+> - **Binding:** the Vent binds to **one specific** Breath (its `peer_id`); there is no
+>   "accept any". Discovery is name-clamped to `dragon<kind>-` ids.
+> - **Threat model (unauthenticated by design).** `dc_peer` frames are unencrypted broadcast and
+>   the `peer_id` is self-reported, so a same-channel sender can spoof a bound id. This is
+>   acceptable **only because these frames drive a benign, non-safety actuator** — a vent damper,
+>   never a heater. A spoofed frame can at most open or close the damper, both harmless (a closed
+>   vent is benign; an open vent is normal cooldown). Per `dc_peer`'s rule, these frames carry
+>   meaning, not safety authority. Pair-time encryption (LMK) is deferred; any consumer that would
+>   drive a *safety-relevant* output from these frames MUST add authentication first.
+
 ## Motivation
 
 DragonVent's AUTO mode opens/closes the vent from the printer's state: it seals for a
