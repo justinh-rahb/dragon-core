@@ -9,6 +9,7 @@
 #include "esp_timer.h"
 #include "nvs.h"
 #include "cJSON.h"
+#include "dc_peer.h"
 
 #include <math.h>
 #include <string.h>
@@ -28,6 +29,11 @@ static TaskHandle_t        s_task = NULL;
 static dc_breath_link_config_t s_cfg = {0};
 static volatile bool       s_active = false;   // consumer needs data (e.g. AUTO mode)
 static dc_breath_snapshot_t s_snap = { .valid = false, .chamber_c = NAN };
+static int64_t             s_espnow_us = 0;    // monotonic time of last good ESP-NOW frame
+
+// If an ESP-NOW push has landed this recently, skip the HTTP poll — ESP-NOW is the
+// primary transport and HTTP is only the fallback when no peer frames are arriving.
+#define ESPNOW_PREFER_US  (30LL * 1000000LL)
 
 // Body buffer — only the single poll task touches it. Pull-based read loop (see dc_prusa).
 static char s_resp[RESP_MAX];
@@ -187,15 +193,54 @@ static void poll_task(void *arg)
     for (;;) {
         bool go;
         xSemaphoreTake(s_lock, portMAX_DELAY);
-        go = s_cfg.enabled && s_cfg.address[0] && s_active;
+        // HTTP is the fallback transport: poll only when enabled, addressed, active, and
+        // ESP-NOW push frames aren't already keeping the snapshot fresh.
+        bool espnow_fresh = s_espnow_us != 0 &&
+                            (esp_timer_get_time() - s_espnow_us) < ESPNOW_PREFER_US;
+        go = s_cfg.enabled && s_cfg.address[0] && s_active && !espnow_fresh;
         xSemaphoreGive(s_lock);
         if (go) {
             poll_once(client, url, sizeof(url));
             vTaskDelay(pdMS_TO_TICKS(DC_BREATH_POLL_MS));
         } else {
-            vTaskDelay(pdMS_TO_TICKS(IDLE_POLL_MS));   // idle: cheap re-check of config/active
+            vTaskDelay(pdMS_TO_TICKS(IDLE_POLL_MS));   // idle: cheap re-check of config/active/espnow
         }
     }
+}
+
+// ---------- ESP-NOW ingest (dc_peer) ----------
+
+// Runs in the ESP-NOW recv context. Maps a peer heater frame into the same snapshot the
+// HTTP poll fills, stamping updated_us with LOCAL receipt time (RFC 0004 freshness).
+// v1 accepts any peer while enabled; peer_id identity filtering is a follow-up.
+static void on_peer_heater(const char *peer_id, dc_peer_cap_t cap,
+                           const void *payload, size_t len, void *ctx)
+{
+    (void)peer_id; (void)cap; (void)ctx;
+    if (len < sizeof(dc_peer_heater_t) || !s_lock) return;
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    bool enabled = s_cfg.enabled;
+    xSemaphoreGive(s_lock);
+    if (!enabled) return;
+
+    const dc_peer_heater_t *hp = (const dc_peer_heater_t *)payload;
+    const char *mode = hp->mode == 1 ? "power_on"
+                     : hp->mode == 2 ? "auto"
+                     : hp->mode == 3 ? "drying" : "off";
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    s_snap.valid = true;
+    s_snap.connected = true;
+    strncpy(s_snap.mode, mode, sizeof(s_snap.mode) - 1);
+    s_snap.mode[sizeof(s_snap.mode) - 1] = '\0';
+    s_snap.target_c  = (float)hp->target_dc / 10.0f;
+    s_snap.chamber_c = hp->chamber_dc == DC_PEER_TEMP_UNKNOWN ? NAN : (float)hp->chamber_dc / 10.0f;
+    s_snap.demand    = (hp->flags & DC_PEER_HEATER_DEMAND) != 0;
+    s_snap.fault     = (hp->flags & DC_PEER_HEATER_FAULT) != 0;
+    s_snap.inhibited = (hp->flags & DC_PEER_HEATER_INHIBITED) != 0;
+    s_snap.state_revision = hp->state_revision;
+    s_snap.updated_us = esp_timer_get_time();
+    s_espnow_us = s_snap.updated_us;
+    xSemaphoreGive(s_lock);
 }
 
 // ---------- public API ----------
@@ -212,6 +257,10 @@ esp_err_t dc_breath_link_start(void)
     xSemaphoreGive(s_lock);
     ESP_LOGI(TAG, "start: enabled=%d address='%s'", cfg.enabled, cfg.address);
 
+    // Subscribe to ESP-NOW heater pushes (the primary transport). Harmless if the
+    // device never calls dc_peer_start() — no frames will arrive.
+    dc_peer_subscribe(DC_PEER_CAP_HEATER, on_peer_heater, NULL);
+
     if (xTaskCreate(poll_task, "dc_breath", 6144, NULL, 4, &s_task) != pdPASS) {
         s_task = NULL;
         return ESP_ERR_NO_MEM;
@@ -227,7 +276,7 @@ esp_err_t dc_breath_link_set_config(const dc_breath_link_config_t *cfg)
     if (s_lock) {
         xSemaphoreTake(s_lock, portMAX_DELAY);
         s_cfg = *cfg;
-        if (!(s_cfg.enabled && s_cfg.address[0])) s_snap.valid = false;   // drop stale data when disabled
+        if (!s_cfg.enabled) s_snap.valid = false;   // drop stale data when the source is disabled
         xSemaphoreGive(s_lock);
     }
     return ESP_OK;
@@ -242,10 +291,13 @@ esp_err_t dc_breath_link_get_config(dc_breath_link_config_t *out)
 
 bool dc_breath_link_configured(void)
 {
+    // Enabled is enough: ESP-NOW needs no address; the address only enables the HTTP
+    // fallback poll. So a Vent with the source toggled on is "configured" and will
+    // consume peer pushes even without an address.
     bool c;
     if (!s_lock) return false;
     xSemaphoreTake(s_lock, portMAX_DELAY);
-    c = s_cfg.enabled && s_cfg.address[0];
+    c = s_cfg.enabled;
     xSemaphoreGive(s_lock);
     return c;
 }
