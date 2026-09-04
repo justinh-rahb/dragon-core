@@ -8,7 +8,7 @@
 // It is never a control source: opt-in per device, advisory only, and fail-safe — a
 // consumer that finds the snapshot stale or absent falls back to its own primary logic.
 // The Breath pushes frames (no polling); freshness is decided by LOCAL receipt time.
-// A bound peer_id scopes the link to one Breath (empty = accept any). See
+// A bound peer_id scopes the link to exactly one Breath; empty = unbound (no signal). See
 // docs/rfc-vent-breath-link.md.
 
 #include <stdbool.h>
@@ -32,7 +32,7 @@ typedef enum {
 // Persisted configuration (NVS namespace "app_nvs").
 typedef struct {
     bool enabled;                       // info source on/off (default false)
-    char peer_id[DC_PEER_ID_MAX];       // bound DragonBreath peer id; empty => accept any
+    char peer_id[DC_PEER_ID_MAX];       // bound DragonBreath peer id; empty => unbound (no signal)
 } dc_breath_link_config_t;
 
 // Last-known Breath heater state. `valid` stays false until the first frame arrives.

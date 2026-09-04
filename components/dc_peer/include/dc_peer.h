@@ -16,6 +16,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stddef.h>
+#include <string.h>
 #include "esp_err.h"
 
 #define DC_PEER_MAGIC     0xD9
@@ -45,6 +46,21 @@ typedef enum {
     DC_PEER_KIND_WHEEZE  = 3,
     DC_PEER_KIND_TOUCH   = 4,
 } dc_peer_kind_t;
+
+// Map a peer id to its product kind by the "dragon<kind>-<hex>" id convention every
+// provider follows, or DC_PEER_KIND_UNKNOWN if the id is not a known Dragon-family id.
+// Discovery uses this to clamp to expected devices and ignore any other ESP-NOW sender
+// that happens to speak the dc_peer envelope — a peer_id is self-reported and carries
+// no authentication, so this is a name filter, not identity proof.
+static inline dc_peer_kind_t dc_peer_kind_from_id(const char *id)
+{
+    if (!id) return DC_PEER_KIND_UNKNOWN;
+    if (strncmp(id, "dragonbreath-", 13) == 0) return DC_PEER_KIND_BREATH;
+    if (strncmp(id, "dragonvent-",   11) == 0) return DC_PEER_KIND_VENT;
+    if (strncmp(id, "dragonwheeze-", 13) == 0) return DC_PEER_KIND_WHEEZE;
+    if (strncmp(id, "dragontouch-",  12) == 0) return DC_PEER_KIND_TOUCH;
+    return DC_PEER_KIND_UNKNOWN;
+}
 
 // Wire header; the capability payload (payload_len bytes) follows immediately.
 // Packed + fixed-endian fields so it is portable across ESP32 variants.

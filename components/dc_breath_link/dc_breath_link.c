@@ -15,7 +15,7 @@ static const char *TAG = "dc_breath_link";
 
 #define NVS_NS   "app_nvs"
 #define KEY_EN   "bl_en"     // u8: info source enabled
-#define KEY_PEER "bl_peer"   // str: bound DragonBreath peer id ("" = any)
+#define KEY_PEER "bl_peer"   // str: bound DragonBreath peer id ("" = unbound)
 
 static SemaphoreHandle_t       s_lock = NULL;
 static dc_breath_link_config_t s_cfg = {0};
@@ -32,7 +32,7 @@ static esp_err_t nvs_load(dc_breath_link_config_t *out)
     uint8_t en = 0;
     if (nvs_get_u8(h, KEY_EN, &en) == ESP_OK) out->enabled = (en != 0);
     size_t sz = sizeof(out->peer_id);
-    nvs_get_str(h, KEY_PEER, out->peer_id, &sz);   // absent => empty => accept any
+    nvs_get_str(h, KEY_PEER, out->peer_id, &sz);   // absent => empty => unbound (no signal)
     nvs_close(h);
     return ESP_OK;
 }
@@ -52,8 +52,8 @@ static esp_err_t nvs_save(const dc_breath_link_config_t *cfg)
 // ---------- ESP-NOW ingest (dc_peer) ----------
 
 // Runs in the ESP-NOW recv context. Maps a peer heater frame into the snapshot with
-// LOCAL receipt time (RFC 0004 freshness). Accepts a frame only when enabled and, if a
-// peer is bound, only from that peer.
+// LOCAL receipt time (RFC 0004 freshness). Accepts a frame only when enabled and from the
+// one explicitly bound peer (no "accept any").
 static void on_peer_heater(const char *peer_id, dc_peer_cap_t cap,
                            const void *payload, size_t len, void *ctx)
 {
@@ -61,8 +61,11 @@ static void on_peer_heater(const char *peer_id, dc_peer_cap_t cap,
     if (len < sizeof(dc_peer_heater_t) || !s_lock) return;
 
     xSemaphoreTake(s_lock, portMAX_DELAY);
-    bool ok = s_cfg.enabled &&
-              (s_cfg.peer_id[0] == '\0' || strncmp(s_cfg.peer_id, peer_id, DC_PEER_ID_MAX) == 0);
+    // Require an explicit bound peer and an exact match. An unset peer_id accepts
+    // NOTHING (not "any"): the vent acts on this heater state, so it must be tied to
+    // one chosen Breath rather than adopting whoever broadcasts first.
+    bool ok = s_cfg.enabled && s_cfg.peer_id[0] != '\0' &&
+              strncmp(s_cfg.peer_id, peer_id, DC_PEER_ID_MAX) == 0;
     xSemaphoreGive(s_lock);
     if (!ok) return;
 

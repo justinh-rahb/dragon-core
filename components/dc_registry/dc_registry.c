@@ -42,6 +42,10 @@ static void on_frame(const char *peer_id, dc_peer_cap_t cap,
                      const void *payload, size_t len, void *ctx)
 {
     (void)ctx;
+    // Clamp discovery to the known Dragon family: ignore any sender whose id isn't a
+    // "dragon<kind>-" id, so other ESP-NOW traffic that speaks our envelope never shows
+    // up as a device. (A name filter, not authentication — see dc_peer_kind_from_id.)
+    if (dc_peer_kind_from_id(peer_id) == DC_PEER_KIND_UNKNOWN) return;
     int64_t now = esp_timer_get_time();
     portENTER_CRITICAL(&s_mux);
     dc_registry_entry_t *e = entry_for(peer_id, now);
