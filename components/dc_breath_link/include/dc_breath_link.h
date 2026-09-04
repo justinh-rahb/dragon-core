@@ -1,15 +1,14 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 //
-// dc_breath_link — light-touch client that polls a DragonBreath's read-only
-// HTTP state (`GET /api/v2/state`, ~60 s) and exposes a mutex-guarded snapshot of
-// its heater state for consumers (e.g. DragonVent AUTO) to use as an ADVISORY
-// information source.
+// dc_breath_link — consumes a DragonBreath's heater capability over the ESP-NOW peer
+// transport (dc_peer, RFC 0004) and exposes a mutex-guarded snapshot of its heater
+// state for consumers (e.g. DragonVent AUTO) to use as an ADVISORY information source.
 //
-// It is never a control source: opt-in per device, advisory only, and fail-safe —
-// a consumer that finds the snapshot stale or absent must fall back to its own
-// primary logic. All network work runs on one dedicated low-priority task on a
-// gentle cadence, so it never starves the single-core WiFi/httpd. See
+// It is never a control source: opt-in per device, advisory only, and fail-safe — a
+// consumer that finds the snapshot stale or absent falls back to its own primary logic.
+// The Breath pushes frames (no polling); freshness is decided by LOCAL receipt time.
+// A bound peer_id scopes the link to one Breath (empty = accept any). See
 // docs/rfc-vent-breath-link.md.
 
 #include <stdbool.h>
@@ -18,66 +17,59 @@
 #include "esp_err.h"
 #include "dc_peer.h"   // DC_PEER_ID_MAX
 
-// Which transport last updated the snapshot.
+// Which transport last updated the snapshot (only ESP-NOW today; kept for telemetry).
 typedef enum {
     DC_BREATH_TX_NONE   = 0,
     DC_BREATH_TX_ESPNOW = 1,
     DC_BREATH_TX_HTTP   = 2,
 } dc_breath_transport_t;
 
-#define DC_BREATH_ADDR_MAX  64   // host or IP, e.g. "dragonbreath.local"
 #define DC_BREATH_MODE_MAX  12   // "off" / "power_on" / "auto" / "drying"
 
-// Poll cadence and the fresh-window past which a snapshot counts as "no-signal".
-#define DC_BREATH_POLL_MS   60000
-#define DC_BREATH_FRESH_US  (150LL * 1000000LL)   // ~2-3 missed polls
+// Fresh-window past which a snapshot counts as "no-signal".
+#define DC_BREATH_FRESH_US  (150LL * 1000000LL)
 
 // Persisted configuration (NVS namespace "app_nvs").
 typedef struct {
     bool enabled;                       // info source on/off (default false)
-    char address[DC_BREATH_ADDR_MAX];   // Breath host/IP; empty => not configured
+    char peer_id[DC_PEER_ID_MAX];       // bound DragonBreath peer id; empty => accept any
 } dc_breath_link_config_t;
 
-// Last-known Breath heater state. `valid` stays false until the first good poll.
+// Last-known Breath heater state. `valid` stays false until the first frame arrives.
 typedef struct {
     bool     valid;
-    int64_t  updated_us;                // esp_timer_get_time() of the last good poll
-    bool     connected;                 // reachable on the last attempt
+    int64_t  updated_us;                // esp_timer_get_time() of the last good frame
+    bool     connected;                 // a frame has been received
     char     mode[DC_BREATH_MODE_MAX];  // off / power_on / auto / drying
-    float    target_c;                  // target.effective_c (fallback requested_c)
-    float    chamber_c;                 // sensors.chamber.temperature_c (display)
-    bool     demand;                    // heater.demand
-    bool     fault;                     // safety.fault_latched
-    bool     inhibited;                 // safety.inhibited
+    float    target_c;
+    float    chamber_c;                 // display; NAN if the Breath can't observe it
+    bool     demand;
+    bool     fault;
+    bool     inhibited;
     uint32_t state_revision;
     uint8_t  transport;                 // dc_breath_transport_t — what last updated this
-    char     peer_id[DC_PEER_ID_MAX];   // ESP-NOW sender id (empty for HTTP)
+    char     peer_id[DC_PEER_ID_MAX];   // sender id of the last frame
 } dc_breath_snapshot_t;
 
-// Load config from NVS and start the (idle-until-needed) poll task. Idempotent.
+// Load config from NVS and subscribe to the Breath heater capability. Idempotent.
 esp_err_t dc_breath_link_start(void);
 
-// Persist config to NVS and apply live (begins/ends polling as appropriate).
+// Persist config to NVS and apply live.
 esp_err_t dc_breath_link_set_config(const dc_breath_link_config_t *cfg);
 esp_err_t dc_breath_link_get_config(dc_breath_link_config_t *out);
 
-// True when enabled AND a non-empty address is set.
+// True when the info source is enabled.
 bool dc_breath_link_configured(void);
-
-// Consumers gate polling to when they actually need Breath data (e.g. AUTO mode).
-// Polling only runs while active && configured; otherwise the task sleeps.
-void dc_breath_link_set_active(bool active);
 
 // Copy the current snapshot. Returns true if a snapshot has ever been taken
 // (does not imply freshness — check `updated_us` against DC_BREATH_FRESH_US).
 bool dc_breath_link_get(dc_breath_snapshot_t *out);
 
-// Convenience for the primary consumer rule: is the Breath actively running a
-// heating job, per a FRESH snapshot? Encapsulates:
-//   configured && fresh && connected && !fault && !inhibited && target_c > 0
+// Convenience for the primary consumer rule: is the Breath actively running a heating
+// job, per a FRESH snapshot? Encapsulates:
+//   enabled && fresh && !fault && !inhibited && target_c > 0
 //   && mode in { power_on, auto, drying }
-// Returns false whenever the Breath is unconfigured, stale, or not heating —
-// so a consumer can treat "false" as "no reason to seal from the Breath".
+// False whenever the Breath is disabled, stale, or not heating.
 bool dc_breath_link_heater_running(void);
 
 // Erase persisted config (for a factory reset) and drop any cached snapshot.

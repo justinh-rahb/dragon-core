@@ -81,3 +81,12 @@ typedef struct {
 } dc_peer_stats_t;
 
 void dc_peer_get_stats(dc_peer_stats_t *out);
+
+// A peer we've recently heard from (for a "pick your device" UI).
+typedef struct {
+    char    id[DC_PEER_ID_MAX];
+    int64_t last_us;   // esp_timer time last heard
+} dc_peer_info_t;
+
+// Copy up to `max` recently-heard peers into `out`, most-recent first. Returns count.
+int dc_peer_get_peers(dc_peer_info_t *out, int max);

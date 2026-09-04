@@ -20,6 +20,49 @@ static uint32_t s_seq;
 static struct { dc_peer_rx_cb_t cb; void *ctx; } s_subs[MAX_CAPS];
 static dc_peer_stats_t s_stats;
 
+#define ROSTER_MAX 8
+static dc_peer_info_t s_roster[ROSTER_MAX];
+static int            s_roster_n;
+static portMUX_TYPE   s_roster_mux = portMUX_INITIALIZER_UNLOCKED;
+
+// Record/refresh a heard peer. Called from the recv context; guarded so a concurrent
+// dc_peer_get_peers() reader never sees a torn entry.
+static void roster_upsert(const char *id, int64_t now)
+{
+    portENTER_CRITICAL(&s_roster_mux);
+    int slot = -1;
+    for (int i = 0; i < s_roster_n; i++)
+        if (strncmp(s_roster[i].id, id, DC_PEER_ID_MAX) == 0) { slot = i; break; }
+    if (slot < 0) {
+        if (s_roster_n < ROSTER_MAX) { slot = s_roster_n++; }
+        else {  // evict the least-recently-heard
+            slot = 0;
+            for (int k = 1; k < ROSTER_MAX; k++)
+                if (s_roster[k].last_us < s_roster[slot].last_us) slot = k;
+        }
+        strncpy(s_roster[slot].id, id, DC_PEER_ID_MAX - 1);
+        s_roster[slot].id[DC_PEER_ID_MAX - 1] = '\0';
+    }
+    s_roster[slot].last_us = now;
+    portEXIT_CRITICAL(&s_roster_mux);
+}
+
+int dc_peer_get_peers(dc_peer_info_t *out, int max)
+{
+    if (!out || max <= 0) return 0;
+    portENTER_CRITICAL(&s_roster_mux);
+    int n = s_roster_n < max ? s_roster_n : max;
+    for (int i = 0; i < n; i++) out[i] = s_roster[i];
+    portEXIT_CRITICAL(&s_roster_mux);
+    // most-recent first (small n; simple insertion sort by last_us desc)
+    for (int i = 1; i < n; i++) {
+        dc_peer_info_t t = out[i]; int j = i - 1;
+        while (j >= 0 && out[j].last_us < t.last_us) { out[j + 1] = out[j]; j--; }
+        out[j + 1] = t;
+    }
+    return n;
+}
+
 // Runs in the ESP-NOW/Wi-Fi recv context — keep it fast. Validates the envelope and
 // dispatches the payload to the capability's subscriber. Subscribers must not block.
 static void recv_cb(const esp_now_recv_info_t *info, const uint8_t *data, int len)
@@ -33,9 +76,11 @@ static void recv_cb(const esp_now_recv_info_t *info, const uint8_t *data, int le
     char pid[DC_PEER_ID_MAX];
     memcpy(pid, h->peer_id, DC_PEER_ID_MAX);
     pid[DC_PEER_ID_MAX - 1] = '\0';
+    int64_t now = esp_timer_get_time();
     s_stats.rx_frames++;
-    s_stats.last_rx_us = esp_timer_get_time();
+    s_stats.last_rx_us = now;
     memcpy(s_stats.last_peer_id, pid, DC_PEER_ID_MAX);
+    roster_upsert(pid, now);
     dc_peer_rx_cb_t cb = s_subs[h->capability].cb;
     if (!cb) return;
     cb(pid, (dc_peer_cap_t)h->capability, data + sizeof(dc_peer_hdr_t), h->payload_len,
