@@ -3,5 +3,3 @@ description: Read-only Dragon device registry — discovers family peers over dc
 license: MIT
 dependencies:
   idf: ">=5.3"
-  dc_peer:
-    version: "*"
