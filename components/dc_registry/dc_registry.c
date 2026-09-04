@@ -103,11 +103,12 @@ int dc_registry_get(dc_registry_entry_t *out, int max)
     int n = s_n < max ? s_n : max;
     for (int i = 0; i < n; i++) out[i] = s_tbl[i];
     portEXIT_CRITICAL(&s_mux);
-    // most-recently-seen first (small n; insertion sort by last_seen_us desc)
+    // Stable alphabetical order by id. Sorting by recency made the list reshuffle on
+    // every frame; a console wants a list that holds still. Small n — insertion sort.
     for (int i = 1; i < n; i++) {
         dc_registry_entry_t t = out[i];
         int j = i - 1;
-        while (j >= 0 && out[j].last_seen_us < t.last_seen_us) { out[j + 1] = out[j]; j--; }
+        while (j >= 0 && strcmp(out[j].id, t.id) > 0) { out[j + 1] = out[j]; j--; }
         out[j + 1] = t;
     }
     return n;
