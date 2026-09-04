@@ -4,6 +4,7 @@
 #include "esp_now.h"
 #include "esp_wifi.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -17,6 +18,7 @@ static char     s_self_id[DC_PEER_ID_MAX];
 static bool     s_started;
 static uint32_t s_seq;
 static struct { dc_peer_rx_cb_t cb; void *ctx; } s_subs[MAX_CAPS];
+static dc_peer_stats_t s_stats;
 
 // Runs in the ESP-NOW/Wi-Fi recv context — keep it fast. Validates the envelope and
 // dispatches the payload to the capability's subscriber. Subscribers must not block.
@@ -28,11 +30,14 @@ static void recv_cb(const esp_now_recv_info_t *info, const uint8_t *data, int le
     if (h->magic != DC_PEER_MAGIC || h->version != DC_PEER_VERSION) return;
     if ((int)(sizeof(dc_peer_hdr_t) + h->payload_len) > len) return;
     if (h->capability == 0 || h->capability >= MAX_CAPS) return;
-    dc_peer_rx_cb_t cb = s_subs[h->capability].cb;
-    if (!cb) return;
     char pid[DC_PEER_ID_MAX];
     memcpy(pid, h->peer_id, DC_PEER_ID_MAX);
     pid[DC_PEER_ID_MAX - 1] = '\0';
+    s_stats.rx_frames++;
+    s_stats.last_rx_us = esp_timer_get_time();
+    memcpy(s_stats.last_peer_id, pid, DC_PEER_ID_MAX);
+    dc_peer_rx_cb_t cb = s_subs[h->capability].cb;
+    if (!cb) return;
     cb(pid, (dc_peer_cap_t)h->capability, data + sizeof(dc_peer_hdr_t), h->payload_len,
        s_subs[h->capability].ctx);
 }
@@ -60,8 +65,14 @@ esp_err_t dc_peer_start(const char *self_id)
     if (err != ESP_OK) { ESP_LOGE(TAG, "register recv cb: %s", esp_err_to_name(err)); return err; }
 
     s_started = true;
+    s_stats.started = true;
     ESP_LOGI(TAG, "up (self_id='%s')", s_self_id);
     return ESP_OK;
+}
+
+void dc_peer_get_stats(dc_peer_stats_t *out)
+{
+    if (out) *out = s_stats;
 }
 
 esp_err_t dc_peer_publish(dc_peer_cap_t cap, const void *payload, size_t len)
@@ -80,6 +91,7 @@ esp_err_t dc_peer_publish(dc_peer_cap_t cap, const void *payload, size_t len)
     memcpy(h->peer_id, s_self_id, strnlen(s_self_id, DC_PEER_ID_MAX - 1));
     if (payload && len) memcpy(buf + sizeof(dc_peer_hdr_t), payload, len);
 
+    s_stats.tx_frames++;
     return esp_now_send(BCAST, buf, sizeof(dc_peer_hdr_t) + len);
 }
 

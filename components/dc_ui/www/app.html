@@ -2073,7 +2073,9 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     var db=s.dragonbreath||{}, dbCard=$('dv-breath-card');
     if(dbCard) dbCard.hidden=!db.configured;
     if(db.configured){
-      u('dv-breath-link', db.online?'connected':'unreachable');
+      u('dv-breath-link', db.online
+        ? ('connected · '+(db.transport==='espnow'?'ESP-NOW':db.transport==='http'?'HTTP':'?')+(db.peer?' · '+db.peer:''))
+        : 'unreachable');
       u('dv-breath-heater', !db.online?'--':(db.heater_running?('running · '+(db.mode||'?')):'off'));
       var _cc=db.chamber_c==null?'--':Number(db.chamber_c).toFixed(0);
       var _tt=(db.target_c==null||db.target_c<=0)?'--':Number(db.target_c).toFixed(0);

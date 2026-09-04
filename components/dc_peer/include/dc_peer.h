@@ -70,3 +70,14 @@ typedef void (*dc_peer_rx_cb_t)(const char *peer_id, dc_peer_cap_t cap,
 
 // CONSUMER: subscribe to a capability. One callback per capability (last wins).
 esp_err_t dc_peer_subscribe(dc_peer_cap_t cap, dc_peer_rx_cb_t cb, void *ctx);
+
+// Transport diagnostics (for status/telemetry).
+typedef struct {
+    bool     started;                       // dc_peer_start() succeeded
+    uint32_t rx_frames;                     // valid frames received (all capabilities)
+    uint32_t tx_frames;                     // frames published
+    int64_t  last_rx_us;                    // esp_timer time of last rx (0 = never)
+    char     last_peer_id[DC_PEER_ID_MAX];  // sender of the last received frame
+} dc_peer_stats_t;
+
+void dc_peer_get_stats(dc_peer_stats_t *out);

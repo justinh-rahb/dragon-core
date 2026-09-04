@@ -124,6 +124,8 @@ static bool parse_state(const char *json)
     s_snap.fault = fault;
     s_snap.inhibited = inhibited;
     s_snap.state_revision = rev;
+    s_snap.transport = DC_BREATH_TX_HTTP;
+    s_snap.peer_id[0] = '\0';
     s_snap.updated_us = esp_timer_get_time();
     xSemaphoreGive(s_lock);
     cJSON_Delete(root);
@@ -238,6 +240,9 @@ static void on_peer_heater(const char *peer_id, dc_peer_cap_t cap,
     s_snap.fault     = (hp->flags & DC_PEER_HEATER_FAULT) != 0;
     s_snap.inhibited = (hp->flags & DC_PEER_HEATER_INHIBITED) != 0;
     s_snap.state_revision = hp->state_revision;
+    s_snap.transport = DC_BREATH_TX_ESPNOW;
+    strncpy(s_snap.peer_id, peer_id, sizeof(s_snap.peer_id) - 1);
+    s_snap.peer_id[sizeof(s_snap.peer_id) - 1] = '\0';
     s_snap.updated_us = esp_timer_get_time();
     s_espnow_us = s_snap.updated_us;
     xSemaphoreGive(s_lock);

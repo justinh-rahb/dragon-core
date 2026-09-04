@@ -16,6 +16,14 @@
 #include <stdint.h>
 #include <stddef.h>
 #include "esp_err.h"
+#include "dc_peer.h"   // DC_PEER_ID_MAX
+
+// Which transport last updated the snapshot.
+typedef enum {
+    DC_BREATH_TX_NONE   = 0,
+    DC_BREATH_TX_ESPNOW = 1,
+    DC_BREATH_TX_HTTP   = 2,
+} dc_breath_transport_t;
 
 #define DC_BREATH_ADDR_MAX  64   // host or IP, e.g. "dragonbreath.local"
 #define DC_BREATH_MODE_MAX  12   // "off" / "power_on" / "auto" / "drying"
@@ -42,6 +50,8 @@ typedef struct {
     bool     fault;                     // safety.fault_latched
     bool     inhibited;                 // safety.inhibited
     uint32_t state_revision;
+    uint8_t  transport;                 // dc_breath_transport_t — what last updated this
+    char     peer_id[DC_PEER_ID_MAX];   // ESP-NOW sender id (empty for HTTP)
 } dc_breath_snapshot_t;
 
 // Load config from NVS and start the (idle-until-needed) poll task. Idempotent.
