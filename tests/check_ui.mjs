@@ -35,7 +35,6 @@ for (const marker of [
   'data-vent-content="manual"',
   'data-vent-content="auto"',
   "function applyVent(s)",
-  "ventPost('/api/v2/settings'",
   "ventCommand('manual'",
   'ui.product===\'dragonstatus\'',
   'id="ds-app"',

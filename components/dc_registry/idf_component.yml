@@ -1,0 +1,5 @@
+version: "0.1.0"
+description: Read-only Dragon device registry — discovers family peers over dc_peer (ANNOUNCE + status capabilities) for a console UI. Status only; no control.
+license: MIT
+dependencies:
+  idf: ">=5.3"

@@ -1,0 +1,5 @@
+version: "0.1.0"
+description: Light-touch HTTP poll of a DragonBreath's /api/v2/state, exposed as an advisory heater-state snapshot for Dragon consumers (e.g. DragonVent AUTO)
+license: MIT
+dependencies:
+  idf: ">=5.3"

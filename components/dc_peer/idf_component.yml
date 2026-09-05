@@ -1,0 +1,5 @@
+version: "0.1.0"
+description: Dragon peer-capability transport over ESP-NOW (RFC 0003/0004) — connectionless push of semantic capabilities (e.g. heater state) between Dragon products
+license: MIT
+dependencies:
+  idf: ">=5.3"
