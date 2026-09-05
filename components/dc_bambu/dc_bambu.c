@@ -54,12 +54,16 @@ static const char *TAG = "dc_bambu";
 // print object, so a truncated tail still yields the follow signal).
 #define MQTT_BUF   8192
 #define RX_CAP     16384
+#define COMPLETION_HOLD_US 7500000LL
 
 // One pushall on connect; required on P1/A1 (delta-only), harmless on X1.
 static const char PUSHALL[] =
     "{\"pushing\":{\"sequence_id\":\"0\",\"command\":\"pushall\",\"version\":1,\"push_target\":1}}";
 
 static SemaphoreHandle_t        s_lock  = NULL;
+static SemaphoreHandle_t        s_lifecycle_lock = NULL;
+static portMUX_TYPE              s_lock_init_mux = portMUX_INITIALIZER_UNLOCKED;
+static bool                      s_config_loaded = false;
 static dc_bambu_config_t        s_cfg   = {0};
 static dc_bambu_status_t        s_status = {
     .state = DC_BAMBU_DISABLED, .bed_temp = NAN, .bed_target = NAN, .chamber_temp = NAN,
@@ -73,6 +77,37 @@ static char  *s_rx = NULL;                 // RX_CAP reassembly buffer
 static size_t s_rx_len = 0;
 static bool   s_in_report = false;         // current inbound msg is on the report topic
 static int64_t s_chamber_temp_us = 0;      // monotonic timestamp of last chamber_temper sample
+static dc_bambu_gcode_phase_t s_gcode_phase = DC_BAMBU_GCODE_UNKNOWN;
+static uint32_t s_print_error_code = 0;
+static bool s_has_observed_active_job = false;
+static bool s_completion_visible = false;
+static int64_t s_completion_until_us = 0;
+
+static esp_err_t ensure_mutex(SemaphoreHandle_t *slot)
+{
+    portENTER_CRITICAL(&s_lock_init_mux);
+    bool exists = *slot != NULL;
+    portEXIT_CRITICAL(&s_lock_init_mux);
+    if (exists) return ESP_OK;
+    SemaphoreHandle_t candidate = xSemaphoreCreateMutex();
+    if (candidate == NULL) return ESP_ERR_NO_MEM;
+    bool installed = false;
+    portENTER_CRITICAL(&s_lock_init_mux);
+    if (*slot == NULL) {
+        *slot = candidate;
+        installed = true;
+    }
+    portEXIT_CRITICAL(&s_lock_init_mux);
+    if (!installed) vSemaphoreDelete(candidate);
+    return ESP_OK;
+}
+
+static esp_err_t ensure_runtime_locks(void)
+{
+    esp_err_t err = ensure_mutex(&s_lock);
+    if (err != ESP_OK) return err;
+    return ensure_mutex(&s_lifecycle_lock);
+}
 
 // ---------- NVS ----------
 
@@ -126,6 +161,20 @@ static bool find_float(const char *s, const char *key, float *out)
     return true;
 }
 
+// Caller holds s_lock. Keep completion expiry in one place so MQTT reports and
+// status polling cannot disagree about when FINISH becomes IDLE.
+static void expire_completion_locked(int64_t now_us)
+{
+    if (!s_completion_visible || s_completion_until_us <= 0 ||
+        now_us < s_completion_until_us) return;
+    s_completion_visible = false;
+    s_completion_until_us = 0;
+    if (s_status.print_state == DC_BAMBU_PRINT_COMPLETE) {
+        s_status.print_state = DC_BAMBU_PRINT_IDLE;
+        s_status.printing = false;
+    }
+}
+
 // find_string() + active_filament() (tri-state) live in dc_bambu_parse.h so they
 // can be host-unit-tested (tests/dc_bambu_host_test.c).
 
@@ -146,6 +195,8 @@ static void parse_report(const char *json)
     dc_fila_result_t fr = dc_bambu_active_filament(json, fila, sizeof fila);
     char gs[16];
     bool got_gs = dc_bambu_find_string(json, "\"gcode_state\"", gs, sizeof gs);  // print state
+    uint32_t print_error_code = 0;
+    bool got_print_error = dc_bambu_print_error_code(json, &print_error_code);
 
     xSemaphoreTake(s_lock, portMAX_DELAY);
     if (got_bed) {
@@ -160,17 +211,60 @@ static void parse_report(const char *json)
         s_status.chamber_temp_age_ms = 0;
     }
     if (got_percent) s_status.progress = percent < 0 ? 0 : percent > 100 ? 1 : percent / 100.0f;
-    if (got_gs) {
-        s_status.printing = dc_bambu_gcode_active(gs);   // keep prior if a delta omits it
-        s_status.error    = (strcmp(gs, "FAILED") == 0); // Bambu's print-failed state
-        switch (dc_bambu_gcode_phase(gs)) {
-        case DC_BAMBU_GCODE_IDLE:        s_status.print_state = DC_BAMBU_PRINT_IDLE; break;
+    if (got_gs) s_gcode_phase = dc_bambu_gcode_phase(gs);
+    s_print_error_code = dc_bambu_next_print_error_code(
+        s_print_error_code, got_gs, s_gcode_phase,
+        got_print_error, print_error_code);
+    expire_completion_locked(esp_timer_get_time());
+    if (got_gs || got_print_error) {
+        s_status.printing = s_gcode_phase == DC_BAMBU_GCODE_PREPARING ||
+                            s_gcode_phase == DC_BAMBU_GCODE_PRINTING ||
+                            s_gcode_phase == DC_BAMBU_GCODE_PAUSED;
+        s_status.error = s_print_error_code != 0;
+        if (s_status.error) {
+            s_has_observed_active_job = false;
+            s_completion_visible = false;
+            s_completion_until_us = 0;
+            s_status.print_state = DC_BAMBU_PRINT_ERROR;
+        } else switch (s_gcode_phase) {
+        case DC_BAMBU_GCODE_IDLE:
+            s_has_observed_active_job = false;
+            s_completion_visible = false;
+            s_completion_until_us = 0;
+            s_status.print_state = DC_BAMBU_PRINT_IDLE;
+            break;
         case DC_BAMBU_GCODE_DOWNLOADING: s_status.print_state = DC_BAMBU_PRINT_DOWNLOADING; break;
         case DC_BAMBU_GCODE_PREPARING:   s_status.print_state = DC_BAMBU_PRINT_PREPARING; break;
-        case DC_BAMBU_GCODE_PRINTING:    s_status.print_state = DC_BAMBU_PRINT_PRINTING; break;
-        case DC_BAMBU_GCODE_PAUSED:      s_status.print_state = DC_BAMBU_PRINT_PAUSED; break;
-        case DC_BAMBU_GCODE_COMPLETE:    s_status.print_state = DC_BAMBU_PRINT_COMPLETE; break;
-        case DC_BAMBU_GCODE_ERROR:       s_status.print_state = DC_BAMBU_PRINT_ERROR; break;
+        case DC_BAMBU_GCODE_PRINTING:
+            s_has_observed_active_job = true;
+            s_completion_visible = false;
+            s_completion_until_us = 0;
+            s_status.print_state = DC_BAMBU_PRINT_PRINTING;
+            break;
+        case DC_BAMBU_GCODE_PAUSED:
+            s_has_observed_active_job = true;
+            s_completion_visible = false;
+            s_completion_until_us = 0;
+            s_status.print_state = DC_BAMBU_PRINT_PAUSED;
+            break;
+        case DC_BAMBU_GCODE_COMPLETE: {
+            int64_t now_us = esp_timer_get_time();
+            if (s_has_observed_active_job && !s_completion_visible) {
+                s_has_observed_active_job = false;
+                s_completion_visible = true;
+                s_completion_until_us = now_us + COMPLETION_HOLD_US;
+            }
+            s_status.print_state = s_completion_visible
+                ? DC_BAMBU_PRINT_COMPLETE : DC_BAMBU_PRINT_IDLE;
+            break;
+        }
+        case DC_BAMBU_GCODE_ERROR:
+            // Bambu uses FAILED with print_error=0 for a deliberate stop.
+            s_has_observed_active_job = false;
+            s_completion_visible = false;
+            s_completion_until_us = 0;
+            s_status.print_state = DC_BAMBU_PRINT_IDLE;
+            break;
         default:                          s_status.print_state = DC_BAMBU_PRINT_UNKNOWN; break;
         }
     }
@@ -255,30 +349,64 @@ static void mqtt_event_handler(void *args, esp_event_base_t base, int32_t id, vo
 
 // ---------- lifecycle ----------
 
-esp_err_t dc_bambu_start(void)
+static void status_reset(dc_bambu_state_t state)
 {
-    if (s_lock != NULL) return ESP_ERR_INVALID_STATE;
-    s_lock = xSemaphoreCreateMutex();
-    if (s_lock == NULL) return ESP_ERR_NO_MEM;
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    s_status = (dc_bambu_status_t){
+        .state = state,
+        .bed_temp = NAN,
+        .bed_target = NAN,
+        .chamber_temp = NAN,
+        .chamber_temp_age_ms = UINT32_MAX,
+        .progress = -1,
+    };
+    s_chamber_temp_us = 0;
+    s_gcode_phase = DC_BAMBU_GCODE_UNKNOWN;
+    s_print_error_code = 0;
+    s_has_observed_active_job = false;
+    s_completion_visible = false;
+    s_completion_until_us = 0;
+    xSemaphoreGive(s_lock);
+}
 
-    if (nvs_load(&s_cfg) != ESP_OK || s_cfg.host[0] == '\0') {
+static void client_stop(void)
+{
+    if (s_client != NULL) {
+        esp_mqtt_client_stop(s_client);
+        esp_mqtt_client_destroy(s_client);
+        s_client = NULL;
+    }
+    free(s_rx);
+    s_rx = NULL;
+    s_rx_len = 0;
+    s_in_report = false;
+}
+
+static esp_err_t client_start(void)
+{
+    dc_bambu_config_t cfg;
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    cfg = s_cfg;
+    xSemaphoreGive(s_lock);
+
+    if (cfg.host[0] == '\0') {
         ESP_LOGI(TAG, "no Bambu config saved; idle");
-        s_status.state = DC_BAMBU_DISABLED;
+        status_reset(DC_BAMBU_DISABLED);
         return ESP_OK;
     }
-    if (s_cfg.serial[0] == '\0' || s_cfg.code[0] == '\0') {
+    if (cfg.serial[0] == '\0' || cfg.code[0] == '\0') {
         ESP_LOGW(TAG, "Bambu needs host + serial + access code; idle");
-        s_status.state = DC_BAMBU_DISABLED;
+        status_reset(DC_BAMBU_DISABLED);
         return ESP_OK;
     }
 
     s_rx = malloc(RX_CAP);
     if (s_rx == NULL) return ESP_ERR_NO_MEM;
-    snprintf(s_report_topic,  sizeof s_report_topic,  "device/%s/report",  s_cfg.serial);
-    snprintf(s_request_topic, sizeof s_request_topic, "device/%s/request", s_cfg.serial);
+    snprintf(s_report_topic,  sizeof s_report_topic,  "device/%s/report",  cfg.serial);
+    snprintf(s_request_topic, sizeof s_request_topic, "device/%s/request", cfg.serial);
 
     char uri[96];
-    snprintf(uri, sizeof uri, "mqtts://%s:8883", s_cfg.host);
+    snprintf(uri, sizeof uri, "mqtts://%s:8883", cfg.host);
     esp_mqtt_client_config_t mc = {
         .broker.address.uri = uri,
         // Self-signed per-device cert (CN=serial) reached by IP: no CA to verify
@@ -290,7 +418,7 @@ esp_err_t dc_bambu_start(void)
         .broker.verification.skip_cert_common_name_check = true,
         .broker.verification.use_global_ca_store = false,
         .credentials.username = "bblp",
-        .credentials.authentication.password = s_cfg.code,
+        .credentials.authentication.password = cfg.code,
         .buffer.size = MQTT_BUF,
     };
 
@@ -298,34 +426,73 @@ esp_err_t dc_bambu_start(void)
     if (s_client == NULL) {
         ESP_LOGE(TAG, "esp_mqtt_client_init failed");
         free(s_rx); s_rx = NULL;
-        s_status.state = DC_BAMBU_DISCONNECTED;
+        status_reset(DC_BAMBU_DISCONNECTED);
         return ESP_FAIL;
     }
     esp_mqtt_client_register_event(s_client, ESP_EVENT_ANY_ID, mqtt_event_handler, NULL);
     esp_err_t err = esp_mqtt_client_start(s_client);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "esp_mqtt_client_start: %s", esp_err_to_name(err));
-        s_status.state = DC_BAMBU_DISCONNECTED;
+        esp_mqtt_client_destroy(s_client);
+        s_client = NULL;
+        free(s_rx); s_rx = NULL;
+        status_reset(DC_BAMBU_DISCONNECTED);
         return err;
     }
-    s_status.state = DC_BAMBU_CONNECTING;
+    status_reset(DC_BAMBU_CONNECTING);
     ESP_LOGI(TAG, "connecting to %s", uri);
+    return ESP_OK;
+}
+
+esp_err_t dc_bambu_start(void)
+{
+    esp_err_t err = ensure_runtime_locks();
+    if (err != ESP_OK) return err;
+    xSemaphoreTake(s_lifecycle_lock, portMAX_DELAY);
+    if (!s_config_loaded) {
+        dc_bambu_config_t saved = {0};
+        if (nvs_load(&saved) == ESP_OK) {
+            xSemaphoreTake(s_lock, portMAX_DELAY);
+            s_cfg = saved;
+            xSemaphoreGive(s_lock);
+        }
+        s_config_loaded = true;
+    }
+    err = s_client != NULL ? ESP_OK : client_start();
+    xSemaphoreGive(s_lifecycle_lock);
+    return err;
+}
+
+esp_err_t dc_bambu_stop(void)
+{
+    if (s_lifecycle_lock == NULL) return ESP_OK;
+    xSemaphoreTake(s_lifecycle_lock, portMAX_DELAY);
+    client_stop();
+    status_reset(DC_BAMBU_DISABLED);
+    xSemaphoreGive(s_lifecycle_lock);
     return ESP_OK;
 }
 
 esp_err_t dc_bambu_set_config(const dc_bambu_config_t *cfg)
 {
     if (cfg == NULL) return ESP_ERR_INVALID_ARG;
-    esp_err_t err = nvs_save(cfg);
+    esp_err_t err = ensure_runtime_locks();
     if (err != ESP_OK) return err;
-    if (s_lock) {
-        xSemaphoreTake(s_lock, portMAX_DELAY);
-        s_cfg = *cfg;
-        xSemaphoreGive(s_lock);
-    } else {
-        s_cfg = *cfg;
+    xSemaphoreTake(s_lifecycle_lock, portMAX_DELAY);
+    err = nvs_save(cfg);
+    if (err != ESP_OK) {
+        xSemaphoreGive(s_lifecycle_lock);
+        return err;
     }
-    return ESP_OK;   // takes effect on next boot (matches dc_moonraker semantics)
+    bool reconnect = s_client != NULL;
+    if (reconnect) client_stop();
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    s_cfg = *cfg;
+    s_config_loaded = true;
+    xSemaphoreGive(s_lock);
+    err = reconnect ? client_start() : ESP_OK;
+    xSemaphoreGive(s_lifecycle_lock);
+    return err;
 }
 
 esp_err_t dc_bambu_get_config(dc_bambu_config_t *out)
@@ -349,12 +516,15 @@ esp_err_t dc_bambu_get_config(dc_bambu_config_t *out)
 esp_err_t dc_bambu_get_status(dc_bambu_status_t *out)
 {
     if (out == NULL) return ESP_ERR_INVALID_ARG;
-    if (s_lock) xSemaphoreTake(s_lock, portMAX_DELAY);
+    int64_t now_us = esp_timer_get_time();
+    if (s_lock) {
+        xSemaphoreTake(s_lock, portMAX_DELAY);
+        expire_completion_locked(now_us);
+    }
     *out = s_status;
     int64_t sample_us = s_chamber_temp_us;
     if (s_lock) xSemaphoreGive(s_lock);
 
-    int64_t now_us = esp_timer_get_time();
     if (sample_us <= 0 || !isfinite(out->chamber_temp)) {
         out->chamber_temp = NAN;
         out->chamber_temp_age_ms = UINT32_MAX;
@@ -372,21 +542,34 @@ esp_err_t dc_bambu_get_status(dc_bambu_status_t *out)
 
 esp_err_t dc_bambu_clear_config(void)
 {
-    nvs_handle_t h;
-    esp_err_t err = nvs_open(NVS_NS, NVS_READWRITE, &h);
+    esp_err_t err = ensure_runtime_locks();
     if (err != ESP_OK) return err;
-    nvs_erase_key(h, KEY_HOST);
-    nvs_erase_key(h, KEY_SER);
-    nvs_erase_key(h, KEY_CODE);
-    nvs_commit(h);
-    nvs_close(h);
-    if (s_lock) {
-        xSemaphoreTake(s_lock, portMAX_DELAY);
-        memset(&s_cfg, 0, sizeof(s_cfg));
-        xSemaphoreGive(s_lock);
-    } else {
-        memset(&s_cfg, 0, sizeof(s_cfg));
+    xSemaphoreTake(s_lifecycle_lock, portMAX_DELAY);
+    nvs_handle_t h;
+    err = nvs_open(NVS_NS, NVS_READWRITE, &h);
+    if (err != ESP_OK) {
+        xSemaphoreGive(s_lifecycle_lock);
+        return err;
     }
+    esp_err_t erase_err = nvs_erase_key(h, KEY_HOST);
+    if (erase_err == ESP_ERR_NVS_NOT_FOUND) erase_err = ESP_OK;
+    if (erase_err == ESP_OK) erase_err = nvs_erase_key(h, KEY_SER);
+    if (erase_err == ESP_ERR_NVS_NOT_FOUND) erase_err = ESP_OK;
+    if (erase_err == ESP_OK) erase_err = nvs_erase_key(h, KEY_CODE);
+    if (erase_err == ESP_ERR_NVS_NOT_FOUND) erase_err = ESP_OK;
+    if (erase_err == ESP_OK) erase_err = nvs_commit(h);
+    nvs_close(h);
+    if (erase_err != ESP_OK) {
+        xSemaphoreGive(s_lifecycle_lock);
+        return erase_err;
+    }
+    client_stop();
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    memset(&s_cfg, 0, sizeof(s_cfg));
+    s_config_loaded = true;
+    xSemaphoreGive(s_lock);
+    status_reset(DC_BAMBU_DISABLED);
+    xSemaphoreGive(s_lifecycle_lock);
     return ESP_OK;
 }
 

@@ -9,6 +9,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <errno.h>
 
 // Result of resolving the active filament from a report. The tri-state matters:
 // a delta report that OMITS filament state must NOT clobber the last known value,
@@ -46,6 +47,101 @@ static inline dc_bambu_gcode_phase_t dc_bambu_gcode_phase(const char *state)
     if (strcmp(state, "FINISH") == 0) return DC_BAMBU_GCODE_COMPLETE;
     if (strcmp(state, "FAILED") == 0) return DC_BAMBU_GCODE_ERROR;
     return DC_BAMBU_GCODE_UNKNOWN;
+}
+
+static inline const char *dc_bambu_json_string_end(const char *q)
+{
+    if (!q || *q != '"') return NULL;
+    for (q++; *q; q++) {
+        if (*q == '\\' && q[1]) { q++; continue; }
+        if (*q == '"') return q;
+    }
+    return NULL;
+}
+
+static inline const char *dc_bambu_json_object_end(const char *object)
+{
+    if (!object || *object != '{') return NULL;
+    int depth = 0;
+    for (const char *p = object; *p; p++) {
+        if (*p == '"') {
+            p = dc_bambu_json_string_end(p);
+            if (!p) return NULL;
+        } else if (*p == '{' || *p == '[') {
+            depth++;
+        } else if (*p == '}' || *p == ']') {
+            if (--depth == 0) return p;
+            if (depth < 0) return NULL;
+        }
+    }
+    return NULL;
+}
+
+static inline const char *dc_bambu_json_direct_member(const char *object,
+                                                       const char *key)
+{
+    const char *limit = dc_bambu_json_object_end(object);
+    if (!limit) return NULL;
+    size_t key_len = strlen(key);
+    int depth = 0;
+    for (const char *p = object + 1; p < limit; p++) {
+        if (*p == '"') {
+            const char *end = dc_bambu_json_string_end(p);
+            if (!end || end > limit) return NULL;
+            if (depth == 0 && (size_t)(end - p - 1) == key_len &&
+                memcmp(p + 1, key, key_len) == 0) {
+                const char *value = end + 1;
+                while (value < limit && (*value == ' ' || *value == '\t' ||
+                       *value == '\n' || *value == '\r')) value++;
+                if (value >= limit || *value != ':') return NULL;
+                value++;
+                while (value < limit && (*value == ' ' || *value == '\t' ||
+                       *value == '\n' || *value == '\r')) value++;
+                return value < limit ? value : NULL;
+            }
+            p = end;
+        } else if (*p == '{' || *p == '[') {
+            depth++;
+        } else if (*p == '}' || *p == ']') {
+            if (depth == 0) return NULL;
+            depth--;
+        }
+    }
+    return NULL;
+}
+
+// Bambu's print_error can be a JSON number or a quoted decimal/hex token. Only
+// accept the direct print.print_error member; nested/historical fields are not
+// the live printer error.
+static inline bool dc_bambu_print_error_code(const char *json, uint32_t *out)
+{
+    const char *q = dc_bambu_json_direct_member(json, "print");
+    if (!q || *q != '{') return false;
+    q = dc_bambu_json_direct_member(q, "print_error");
+    if (!q) return false;
+    bool quoted = *q == '"';
+    if (quoted) q++;
+    char *end = NULL;
+    errno = 0;
+    unsigned long long value = strtoull(q, &end, 0);
+    if (end == q || errno == ERANGE || value > UINT32_MAX) return false;
+    if (quoted) {
+        if (*end != '"') return false;
+    } else if (*end && *end != ',' && *end != '}' && *end != ' ' &&
+               *end != '\t' && *end != '\n' && *end != '\r') {
+        return false;
+    }
+    if (out) *out = (uint32_t)value;
+    return true;
+}
+
+static inline uint32_t dc_bambu_next_print_error_code(
+    uint32_t current, bool got_phase, dc_bambu_gcode_phase_t phase,
+    bool got_error_code, uint32_t incoming)
+{
+    if (got_error_code) return incoming;
+    if (got_phase && phase != DC_BAMBU_GCODE_ERROR) return 0;
+    return current;
 }
 
 // Copy the string value of a JSON key ("key":"value") into out. `key` includes the
