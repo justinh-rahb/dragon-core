@@ -32,6 +32,7 @@ typedef enum {
     DC_PEER_CAP_ANNOUNCE = 2,    // device descriptor     (dc_peer_announce_t) — all
     DC_PEER_CAP_VENT     = 3,    // enclosure-vent state  (dc_peer_vent_t)    — Vent
     DC_PEER_CAP_DRYER    = 4,    // filament-dryer state  (dc_peer_dryer_t)   — Wheeze
+    DC_PEER_CAP_LIGHTING = 5,    // status-light state    (dc_peer_lighting_t) — Status
 } dc_peer_cap_t;
 
 // A capability id as a bit, for the ANNOUNCE `caps` bitmask.
@@ -45,6 +46,7 @@ typedef enum {
     DC_PEER_KIND_VENT    = 2,
     DC_PEER_KIND_WHEEZE  = 3,
     DC_PEER_KIND_TOUCH   = 4,
+    DC_PEER_KIND_STATUS  = 5,
 } dc_peer_kind_t;
 
 // Map a peer id to its product kind by the "dragon<kind>-<hex>" id convention every
@@ -59,6 +61,7 @@ static inline dc_peer_kind_t dc_peer_kind_from_id(const char *id)
     if (strncmp(id, "dragonvent-",   11) == 0) return DC_PEER_KIND_VENT;
     if (strncmp(id, "dragonwheeze-", 13) == 0) return DC_PEER_KIND_WHEEZE;
     if (strncmp(id, "dragontouch-",  12) == 0) return DC_PEER_KIND_TOUCH;
+    if (strncmp(id, "dragonstatus-", 13) == 0) return DC_PEER_KIND_STATUS;
     return DC_PEER_KIND_UNKNOWN;
 }
 
@@ -142,6 +145,27 @@ typedef struct __attribute__((packed)) {
 
 #define DC_PEER_DRYER_POWER   0x01
 #define DC_PEER_DRYER_ACTIVE  0x02
+
+// LIGHTING capability payload — read-only status-light telemetry (DragonStatus).
+// The printer fields are an advisory display summary of the Status device's own
+// source; they never grant motion, thermal, or job-control authority. `effect` is
+// the shared dc_lighting effect number, and `color` is the resolved RGB output.
+typedef struct __attribute__((packed)) {
+    uint8_t  printer_state;      // dc_peer_printer_t
+    uint8_t  progress_pct;       // 0..100; 0 when unavailable
+    uint8_t  brightness;         // configured renderer brightness, 0..255
+    uint8_t  effect;             // resolved dc_lighting effect id
+    uint8_t  flags;              // DC_PEER_LIGHTING_* bits
+    uint8_t  color[3];           // resolved RGB color
+    uint16_t wire_pixels;        // physical pixels driven by the renderer
+    uint16_t reserved;           // 0
+    uint32_t state_revision;     // increments when published state changes
+} dc_peer_lighting_t;
+
+#define DC_PEER_LIGHTING_ENABLED         0x01
+#define DC_PEER_LIGHTING_HARDWARE_READY  0x02
+#define DC_PEER_LIGHTING_RENDERER_FAULT  0x04
+#define DC_PEER_LIGHTING_STANDBY_BLANK   0x08
 
 // Initialise ESP-NOW and the broadcast peer, and adopt `self_id` as this device's
 // peer_id on everything it publishes. Call once, AFTER dc_wifi_start(). Idempotent.

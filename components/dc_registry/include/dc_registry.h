@@ -40,6 +40,7 @@ typedef struct {
         dc_peer_heater_t heater;        // DC_PEER_CAP_HEATER
         dc_peer_vent_t   vent;          // DC_PEER_CAP_VENT
         dc_peer_dryer_t  dryer;         // DC_PEER_CAP_DRYER
+        dc_peer_lighting_t lighting;     // DC_PEER_CAP_LIGHTING
     } status;
 } dc_registry_entry_t;
 

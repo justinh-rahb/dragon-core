@@ -70,6 +70,7 @@ static void on_frame(const char *peer_id, dc_peer_cap_t cap,
                 case DC_PEER_CAP_HEATER: n = sizeof(dc_peer_heater_t); break;
                 case DC_PEER_CAP_VENT:   n = sizeof(dc_peer_vent_t);   break;
                 case DC_PEER_CAP_DRYER:  n = sizeof(dc_peer_dryer_t);  break;
+                case DC_PEER_CAP_LIGHTING: n = sizeof(dc_peer_lighting_t); break;
                 default: break;
             }
             if (n && len >= n) {
@@ -82,6 +83,7 @@ static void on_frame(const char *peer_id, dc_peer_cap_t cap,
                     e->kind = cap == DC_PEER_CAP_HEATER ? DC_PEER_KIND_BREATH
                             : cap == DC_PEER_CAP_VENT   ? DC_PEER_KIND_VENT
                             : cap == DC_PEER_CAP_DRYER  ? DC_PEER_KIND_WHEEZE
+                            : cap == DC_PEER_CAP_LIGHTING ? DC_PEER_KIND_STATUS
                                                         : DC_PEER_KIND_UNKNOWN;
                 }
             }
@@ -96,7 +98,8 @@ esp_err_t dc_registry_start(void)
     if (err == ESP_OK) err = dc_peer_subscribe(DC_PEER_CAP_HEATER, on_frame, NULL);
     if (err == ESP_OK) err = dc_peer_subscribe(DC_PEER_CAP_VENT,   on_frame, NULL);
     if (err == ESP_OK) err = dc_peer_subscribe(DC_PEER_CAP_DRYER,  on_frame, NULL);
-    if (err == ESP_OK) ESP_LOGI(TAG, "device registry up (announce + heater/vent/dryer)");
+    if (err == ESP_OK) err = dc_peer_subscribe(DC_PEER_CAP_LIGHTING, on_frame, NULL);
+    if (err == ESP_OK) ESP_LOGI(TAG, "device registry up (announce + heater/vent/dryer/lighting)");
     return err;
 }
 

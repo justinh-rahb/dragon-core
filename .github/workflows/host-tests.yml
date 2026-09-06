@@ -33,6 +33,9 @@ jobs:
       - name: Run generic PID tests
         run: tests/run_pid_host_test.sh
 
+      - name: Check peer wire contract
+        run: tests/run_peer_contract_host_test.sh
+
       - name: Check family SPA syntax and capability contract
         run: node tests/check_ui.mjs
 
