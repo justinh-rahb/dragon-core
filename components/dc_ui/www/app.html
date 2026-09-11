@@ -2309,8 +2309,12 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     var src = s.environment.control_source || 'klipper';
     var isBambu = (src==='bambu');
     /* Filament chamber zones apply to any bed source that reports the active
-       filament — Bambu and Klipper (Moonraker). */
-    var usesZones = isBambu || (src==='klipper');
+       filament — Bambu and Klipper (Moonraker). But when the Klipper [dragonbreath]
+       helper is active it owns chamber heat directly (M141/M191), AUTO is
+       unavailable, and the zones — which only feed AUTO — are inert, so hide both
+       zone cards too. Bambu is unaffected: klipper_helper_present is only ever set
+       on the Klipper/Moonraker source. */
+    var usesZones = (isBambu || (src==='klipper')) && !s.environment.klipper_helper_present;
     var zc = document.getElementById('zones-card');
     var zcc = document.getElementById('zones-custom-card');
     if(zc){ zc.hidden = !usesZones; if(usesZones) loadZones(); }
