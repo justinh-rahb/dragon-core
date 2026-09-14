@@ -40,6 +40,8 @@ typedef esp_err_t (*dc_portal_validate_image_fn)(const esp_app_desc_t *image,
 typedef struct {
     const char *product;
     const char *display_name;
+    /* Optional product landing page. GET / redirects here when set. */
+    const char *root_redirect;
     const httpd_uri_t *product_routes;
     size_t product_route_count;
     dc_portal_register_fn register_product_routes;
