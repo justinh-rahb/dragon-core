@@ -22,3 +22,20 @@ bool dc_wifi_password_valid(const char *password)
     }
     return true;
 }
+
+bool dc_wifi_hostname_valid(const char *hostname)
+{
+    // A single DNS label (RFC 1123): 1-32 chars, letters/digits/hyphen, and no
+    // leading or trailing hyphen. The 32-char cap matches the identity buffer.
+    // esp_netif/mDNS accept a wider range, so this is what actually keeps a bad
+    // value from silently breaking DHCP/mDNS resolution on the LAN.
+    if (hostname == NULL) return false;
+    size_t len = strlen(hostname);
+    if (len == 0 || len > 32) return false;
+    if (hostname[0] == '-' || hostname[len - 1] == '-') return false;
+    for (size_t i = 0; i < len; ++i) {
+        char c = hostname[i];
+        if (!isalnum((unsigned char)c) && c != '-') return false;
+    }
+    return true;
+}

@@ -38,6 +38,27 @@ int main(void)
     pass65[65] = '\0';
     assert(!dc_wifi_password_valid(pass65));
 
+    // Hostname (RFC 1123 label): 1-32 chars of [A-Za-z0-9-], no leading/trailing hyphen.
+    assert(dc_wifi_hostname_valid("dragonbreath"));
+    assert(dc_wifi_hostname_valid("chamber-1"));
+    assert(dc_wifi_hostname_valid("A"));
+    assert(dc_wifi_hostname_valid("123"));
+    assert(!dc_wifi_hostname_valid(NULL));
+    assert(!dc_wifi_hostname_valid(""));
+    assert(!dc_wifi_hostname_valid("-lead"));
+    assert(!dc_wifi_hostname_valid("trail-"));
+    assert(!dc_wifi_hostname_valid("has space"));
+    assert(!dc_wifi_hostname_valid("under_score"));
+    assert(!dc_wifi_hostname_valid("dot.name"));
+    char host32[33];
+    memset(host32, 'h', 32);
+    host32[32] = '\0';
+    assert(dc_wifi_hostname_valid(host32));
+    char host33[34];
+    memset(host33, 'h', 33);
+    host33[33] = '\0';
+    assert(!dc_wifi_hostname_valid(host33));
+
     puts("dc_wifi credential validation: PASS");
     return 0;
 }
