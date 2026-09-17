@@ -1,4 +1,5 @@
 #include "dc_moonraker.h"
+#include "dc_moonraker_material.h"
 #include "dc_evlog.h"
 
 #include "cJSON.h"
@@ -66,11 +67,21 @@ static char  s_wh_state[16]     = "";   // webhooks.state
 static float s_last_progress    = 0.0f;
 
 // Material sources, in priority order: an explicit save_variables value (user
-// opt-in) wins; otherwise the slicer's per-tool filament_type list from the
+// opt-in) wins; otherwise the slicer's per-slot filament_type list from the
 // g-code metadata, indexed by the active tool (toolhead.extruder) so a
 // multi-material printer reports the filament that's actually printing.
+//
+// filament_type is a PER-SLICER-SLOT list ("PLA;PETG" = project slot 0 is PLA,
+// slot 1 is PETG), but the active-tool index is a PHYSICAL extruder. On a
+// single-nozzle printer toolhead.extruder is always "extruder" (index 0), so a
+// multi-filament project whose sliced object uses only slot 1 (PETG) would
+// otherwise resolve to slot 0 (PLA) and mis-drive AUTO. The slicer also emits
+// per-slot usage (filament_used_mm: [used0, used1, ...]); a slot with zero usage
+// was not printed, so we prefer a slot that actually consumed filament.
 static char  s_mat_sv[16]       = "";      // save_variables.variables.material
-static char  s_fil_list[8][12]  = {{0}};   // per-tool filament_type from metadata
+static char  s_fil_list[8][12]  = {{0}};   // per-slot filament_type from metadata
+static float s_fil_used[8]      = {0};     // per-slot filament_used_mm from metadata
+static bool  s_fil_used_known   = false;   // metadata carried usage we could parse
 static int   s_fil_count        = 0;
 static int   s_active_tool      = 0;       // toolhead.extruder index (extruder=0, extruder1=1, ...)
 static char  s_meta_file[64]    = "";      // filename we last requested metadata for
@@ -197,17 +208,20 @@ static void copy_upper(char *dst, size_t dst_sz, const char *src)
 
 // Publish the effective material: explicit save_variables wins; else the active
 // tool's filament from the metadata list (clamped, so a single-tool list or an
-// out-of-range tool still resolves). Caller holds s_lock.
+// out-of-range tool still resolves). When per-slot usage is known and the active
+// tool's slot was not actually printed (zero filament_used_mm) — the single-nozzle
+// multi-filament case where the active tool is always slot 0 but the object uses a
+// different slot — fall back to the slot that consumed the most filament, so AUTO
+// follows the filament that is really being printed. Caller holds s_lock.
 static void recompute_material(void)
 {
     const char *src = "";
     if (s_mat_sv[0]) {
         src = s_mat_sv;
     } else if (s_fil_count > 0) {
-        int idx = s_active_tool;
-        if (idx < 0) idx = 0;
-        if (idx >= s_fil_count) idx = s_fil_count - 1;
-        src = s_fil_list[idx];
+        int idx = dc_moonraker_pick_material_slot(
+            s_fil_count, s_active_tool, s_fil_used, s_fil_used_known);
+        if (idx >= 0) src = s_fil_list[idx];
     }
     strncpy(s_status.material, src, sizeof(s_status.material) - 1);
     s_status.material[sizeof(s_status.material) - 1] = '\0';
@@ -373,9 +387,11 @@ static void handle_frame(const char *json, size_t len)
             maybe_fetch_metadata();   // a print may already be loaded
             return;
         }
-        // server.files.metadata reply: {"result":{"filament_type":"PLA;ABS;..."}}.
-        // Split the comma/semicolon-separated per-tool list; recompute_material
-        // then picks the active tool's entry. save_variables (if any) still wins.
+        // server.files.metadata reply: {"result":{"filament_type":"PLA;ABS;...",
+        //   "filament_used_mm":[123.0, 0.0, ...]}}.
+        // Split the semicolon/comma-separated per-slot type list; recompute_material
+        // then picks the active tool's entry, preferring an actually-printed slot
+        // when per-slot usage is known. save_variables (if any) still wins.
         cJSON *ft = cJSON_GetObjectItemCaseSensitive(result, "filament_type");
         if (cJSON_IsString(ft) && ft->valuestring[0]) {
             xSemaphoreTake(s_lock, portMAX_DELAY);
@@ -393,6 +409,24 @@ static void handle_frame(const char *json, size_t len)
                 dst[k] = '\0';
                 if (dst[0]) ++s_fil_count;
                 if (*p == ',' || *p == ';') ++p;
+            }
+            // Per-slot usage, aligned index-for-index with the type list. A slot
+            // with zero usage was not printed. Absent on older Moonraker/slicers,
+            // leaving usage unknown so recompute falls back to the active tool.
+            s_fil_used_known = false;
+            for (int i = 0; i < (int)(sizeof(s_fil_used) / sizeof(s_fil_used[0])); ++i)
+                s_fil_used[i] = 0.0f;
+            cJSON *fu = cJSON_GetObjectItemCaseSensitive(result, "filament_used_mm");
+            if (cJSON_IsArray(fu)) {
+                int i = 0;
+                cJSON *e;
+                cJSON_ArrayForEach(e, fu) {
+                    if (i >= s_fil_count ||
+                        i >= (int)(sizeof(s_fil_used) / sizeof(s_fil_used[0]))) break;
+                    if (cJSON_IsNumber(e)) s_fil_used[i] = (float)e->valuedouble;
+                    ++i;
+                }
+                if (i > 0) s_fil_used_known = true;
             }
             recompute_material();
             char mat[16];
