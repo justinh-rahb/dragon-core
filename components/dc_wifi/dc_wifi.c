@@ -31,6 +31,7 @@ static const char *TAG = "dc_wifi";
 #define KEY_AP_IP   "ap_ip"
 #define KEY_AP_EN   "ap_enabled"   // legacy bool, migrated to KEY_AP_MODE
 #define KEY_AP_MODE "ap_mode"      // u8 dc_wifi_ap_mode_t
+#define KEY_HOSTNAME "hostname"    // user override for the DHCP/mDNS hostname
 
 // ~4 s per attempt. The CONSTRAINED profile tries 20 (≈ 80 s) to ride out a flaky
 // mesh node before falling back to the portal; STANDARD uses the original 5 (≈ 20 s),
@@ -636,6 +637,17 @@ esp_err_t dc_wifi_start(void)
     // app_nvs blobs so the device rejoins without re-provisioning.
     migrate_stock_nvs();
 
+    // Apply a user hostname override (dc_wifi_set_hostname) over the product default
+    // set via dc_wifi_set_identity(). Read here, after NVS is up and before the
+    // hostname reaches esp_netif/mDNS below, so products need no per-boot glue.
+    {
+        char stored[sizeof(s_hostname)];
+        if (nvs_read_str(KEY_HOSTNAME, stored, sizeof(stored)) == ESP_OK &&
+            dc_wifi_hostname_valid(stored)) {
+            snprintf(s_hostname, sizeof(s_hostname), "%s", stored);
+        }
+    }
+
     // Netif + event loop
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
@@ -806,6 +818,29 @@ dc_wifi_ap_mode_t dc_wifi_ap_mode_from_str(const char *s, dc_wifi_ap_mode_t fall
     if (strcmp(s, "off")      == 0) return DC_WIFI_AP_OFF;
     if (strcmp(s, "fallback") == 0) return DC_WIFI_AP_FALLBACK;
     return fallback;
+}
+
+esp_err_t dc_wifi_get_hostname(char *out, size_t out_size)
+{
+    if (out == NULL || out_size == 0) return ESP_ERR_INVALID_ARG;
+    // Effective value: a valid NVS override wins, else the identity default that
+    // set_identity copied into s_hostname (or the built-in DC_WIFI_DEFAULT_HOSTNAME).
+    char stored[sizeof(s_hostname)];
+    if (nvs_read_str(KEY_HOSTNAME, stored, sizeof(stored)) == ESP_OK &&
+        dc_wifi_hostname_valid(stored)) {
+        snprintf(out, out_size, "%s", stored);
+    } else {
+        snprintf(out, out_size, "%s", s_hostname);
+    }
+    return ESP_OK;
+}
+
+esp_err_t dc_wifi_set_hostname(const char *hostname)
+{
+    if (!dc_wifi_hostname_valid(hostname)) return ESP_ERR_INVALID_ARG;
+    // Persist only; the new hostname is applied by dc_wifi_start() on the next boot
+    // (esp_netif/mDNS bind the hostname once, at init).
+    return nvs_write_str(KEY_HOSTNAME, hostname);
 }
 
 esp_err_t dc_wifi_get_ap_config(dc_wifi_ap_config_t *out)

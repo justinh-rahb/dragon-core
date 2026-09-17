@@ -28,8 +28,19 @@ typedef struct {
 } dc_wifi_identity_t;
 
 // Configure product-specific network identity. Must be called before dc_wifi_start().
-// If omitted, family-neutral Dragon defaults are used.
+// If omitted, family-neutral Dragon defaults are used. The hostname supplied here is
+// the product DEFAULT: at dc_wifi_start() a valid user override persisted in NVS
+// (see dc_wifi_set_hostname) takes precedence, so products keep passing their brand
+// default and inherit the configurable hostname with no per-product boot glue.
 esp_err_t dc_wifi_set_identity(const dc_wifi_identity_t *identity);
+
+// Configurable device hostname (DHCP + mDNS "<hostname>.local"). The effective value
+// is the NVS override if a valid one is stored, else the identity default. Persisted
+// under app_nvs; family-wide, so every Dragon product gets it from Core.
+//   get: copy the effective hostname into `out` (needs >= 33 bytes).
+//   set: validate (dc_wifi_hostname_valid) and persist; applied on the next boot.
+esp_err_t dc_wifi_get_hostname(char *out, size_t out_size);
+esp_err_t dc_wifi_set_hostname(const char *hostname);
 
 // AP hotspot lifecycle. The AP + captive portal is ALWAYS brought up when there
 // are no saved STA credentials (first-boot setup is otherwise impossible); this
@@ -78,6 +89,9 @@ typedef struct {
 // characters, or exactly 64 hexadecimal digits for a raw WPA key.
 bool dc_wifi_ssid_valid(const char *ssid, bool allow_empty);
 bool dc_wifi_password_valid(const char *password);
+// A single DNS label (RFC 1123): 1-32 chars of [A-Za-z0-9-], no leading/trailing
+// hyphen. Gates a user-supplied hostname before it reaches DHCP/mDNS.
+bool dc_wifi_hostname_valid(const char *hostname);
 
 // Radio tuning profile. STANDARD is stock ESP-IDF STA behavior — modem power-save
 // on, a short connect-retry budget, and no DHCP-lease watchdog — and is correct for
