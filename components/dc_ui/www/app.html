@@ -966,10 +966,10 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
           <h3>Heater control method</h3>
           <label class="form-label" for="s-method-sel">Chamber control</label>
           <select class="form-select" id="s-method-sel">
-            <option value="bangbang">Bang-bang (default, v1.1.15)</option>
-            <option value="pid">PID / PTC (v1.1.16)</option>
+            <option value="bangbang">Bang-Bang (default)</option>
+            <option value="pid">PID / PTC (experimental)</option>
           </select>
-          <p class="set-note"><strong>Bang-bang</strong> holds the chamber with a simple on/off around the target — the reliable default. <strong>PID/PTC</strong> is the newer proportional path; select it only to A/B test. Both keep every safety cutoff and the element foldback. Applies immediately; no reboot.</p>
+          <p class="set-note"><strong>Bang-Bang</strong> holds the chamber with a simple on/off around the target — the reliable default. <strong>PID/PTC</strong> is an <strong>experimental</strong> proportional path — select it only to A/B test. Both keep every safety cutoff and the element foldback. Applies immediately; no reboot.</p>
           <div class="mode-feedback" id="s-method-msg" role="status" aria-live="polite"></div>
         </div>
 
@@ -2842,7 +2842,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     flash('s-method-msg', 'Applying…');
     request('/api/v2/heater_method', {method:val})
       .then(function(r){
-        var name = (r&&r.method==='pid') ? 'PID / PTC' : 'Bang-bang';
+        var name = (r&&r.method==='pid') ? 'PID / PTC' : 'Bang-Bang';
         flash('s-method-msg', 'Now using '+name+'.', 'is-ok');
       })
       .catch(function(j){ flash('s-method-msg', 'Failed: '+((j&&(j.message||j.error))||'error'), 'is-error'); })
