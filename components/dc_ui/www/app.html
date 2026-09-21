@@ -960,6 +960,19 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
           <div class="mode-feedback" id="s-fb-msg" role="status" aria-live="polite"></div>
         </div>
 
+        <!-- Chamber control method (GET/POST /api/v2/heater_method). Hidden unless the
+             product advertises a heater method in /api/v2/state (heater.method). -->
+        <div class="set-card" id="s-method-card" hidden>
+          <h3>Heater control method</h3>
+          <label class="form-label" for="s-method-sel">Chamber control</label>
+          <select class="form-select" id="s-method-sel">
+            <option value="bangbang">Bang-bang (default, v1.1.15)</option>
+            <option value="pid">PID / PTC (v1.1.16)</option>
+          </select>
+          <p class="set-note"><strong>Bang-bang</strong> holds the chamber with a simple on/off around the target — the reliable default. <strong>PID/PTC</strong> is the newer proportional path; select it only to A/B test. Both keep every safety cutoff and the element foldback. Applies immediately; no reboot.</p>
+          <div class="mode-feedback" id="s-method-msg" role="status" aria-live="polite"></div>
+        </div>
+
         <!-- Auto-mode fan-only filtration band (GET/POST /settings?filter_temp=&filter_auto=). -->
         <div class="set-card">
           <h3>Filtration (auto mode)</h3>
@@ -2259,6 +2272,15 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     u('db-target', s.target.effective_c>0 ? Math.round(s.target.effective_c)+' °C' : 'Off');
     u('db-version', s.firmware || '—');
 
+    /* Heater control method card: reveal + reflect the active method. Hidden unless
+       the product reports one (older firmware / other products stay hidden). Don't
+       clobber the <select> while the user is on it or a change is in flight. */
+    if(s.heater && s.heater.method){
+      var _mc=$('s-method-card'), _ms=$('s-method-sel');
+      if(_mc) _mc.hidden=false;
+      if(_ms && document.activeElement!==_ms && !_ms.dataset.busy) _ms.value=s.heater.method;
+    }
+
     /* Light up the quick preset matching the active manual target, the same way the
        Filtration button shows its state (.btn[aria-pressed="true"]). */
     var activeTemp = (s.mode==='power_on')
@@ -2811,6 +2833,20 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
         flash('s-filt-msg', en ? ('Saved — blower at bed ≥ '+sset.filt.val+' °C.') : 'Saved — band off.', 'is-ok');
       })
       .catch(function(j){ flash('s-filt-msg', 'Save failed: '+((j&&(j.message||j.error))||'error'), 'is-error'); });
+  });
+
+  /* Heater control method -> POST /api/v2/heater_method. Applies live (no reboot);
+     apply() reflects the confirmed method back into the <select> on the next state. */
+  if($('s-method-sel')) $('s-method-sel').addEventListener('change', function(){
+    var sel=this, val=sel.value; sel.dataset.busy='1';
+    flash('s-method-msg', 'Applying…');
+    request('/api/v2/heater_method', {method:val})
+      .then(function(r){
+        var name = (r&&r.method==='pid') ? 'PID / PTC' : 'Bang-bang';
+        flash('s-method-msg', 'Now using '+name+'.', 'is-ok');
+      })
+      .catch(function(j){ flash('s-method-msg', 'Failed: '+((j&&(j.message||j.error))||'error'), 'is-error'); })
+      .finally(function(){ delete sel.dataset.busy; });
   });
 
   /* ===== U4: Sensor calibration (GET/POST /api/v2/calibration) ================
