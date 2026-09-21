@@ -24,6 +24,9 @@ jobs:
       - name: Run Prusa freshness tests
         run: tests/run_prusa_host_test.sh
 
+      - name: Run Moonraker material-slot selection tests
+        run: tests/run_moonraker_material_host_test.sh
+
       - name: Test Wi-Fi credential boundary validation
         run: tests/run_wifi_validate_host_test.sh
 
