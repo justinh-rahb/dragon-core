@@ -185,3 +185,45 @@ bool dc_evlog_console_snapshot_read(const dc_evlog_console_view_t *view,
     portEXIT_CRITICAL(&s_con_mux);
     return true;
 }
+
+dc_evlog_console_read_status_t dc_evlog_console_read(uint64_t cursor,
+                                                     char *out, size_t max,
+                                                     dc_evlog_console_read_t *info)
+{
+    if (info == NULL) return DC_EVLOG_CONSOLE_READ_INVALID_ARG;
+    memset(info, 0, sizeof(*info));
+    if (out == NULL && max != 0) return DC_EVLOG_CONSOLE_READ_INVALID_ARG;
+
+    const uint64_t cap = DC_EVLOG_CONSOLE_BYTES;
+    dc_evlog_console_read_status_t status = DC_EVLOG_CONSOLE_READ_OK;
+
+    portENTER_CRITICAL(&s_con_mux);
+    const uint64_t w = s_con_write_seq;
+    const uint64_t oldest = w > cap ? w - cap : 0;
+    info->cursor = cursor;
+    info->oldest_seq = oldest;
+    info->write_seq = w;
+    info->capacity = DC_EVLOG_CONSOLE_BYTES;
+    if (cursor > w) {
+        status = DC_EVLOG_CONSOLE_READ_FUTURE_CURSOR;
+    } else {
+        const uint64_t start = cursor < oldest ? oldest : cursor;
+        uint64_t n = w - start;              // <= cap, so it fits size_t
+        if (n > (uint64_t)max) n = (uint64_t)max;
+        if (n > 0) {
+            // s_con_head == write_seq % cap is an append invariant, so an
+            // absolute sequence maps to ring index seq % cap.
+            size_t idx = (size_t)(start % cap);
+            size_t first = DC_EVLOG_CONSOLE_BYTES - idx;
+            if ((uint64_t)first > n) first = (size_t)n;
+            memcpy(out, s_con + idx, first);
+            if ((uint64_t)first < n) memcpy(out + first, s_con, (size_t)n - first);
+        }
+        info->start_seq = start;
+        info->end_seq = start + n;
+        info->lost_bytes = start - cursor;
+        info->len = (size_t)n;
+    }
+    portEXIT_CRITICAL(&s_con_mux);
+    return status;
+}
