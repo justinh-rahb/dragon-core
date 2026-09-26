@@ -1,0 +1,5 @@
+version: "0.35.2"
+description: Read-only absolute-cursor HTTP export of the dc_evlog console ring
+license: MIT
+dependencies:
+  idf: ">=5.3"

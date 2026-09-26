@@ -68,3 +68,54 @@ size_t dc_evlog_console_snapshot_begin(dc_evlog_console_view_t *view,
 bool dc_evlog_console_snapshot_read(const dc_evlog_console_view_t *view,
                                     size_t offset, char *out, size_t max,
                                     size_t *written);
+
+// ---- absolute-cursor console read ----
+// Every byte ever appended to the console ring has an absolute sequence number
+// for the current boot: the first captured byte is 0 and `write_seq` is the
+// sequence number the next byte will receive. Sequence numbers restart at 0 on
+// every boot, so a cursor is only meaningful together with a product-owned boot
+// identity (see dc_logtail).
+//
+// With W = write_seq and C = DC_EVLOG_CONSOLE_BYTES, the retained window is
+// [oldest_seq, W) where oldest_seq = max(0, W - C). For a requested cursor:
+//
+//   oldest_seq <= cursor <= W  -> read starts exactly at cursor, lost_bytes 0
+//   cursor < oldest_seq        -> bytes were overwritten; read starts at
+//                                 oldest_seq, lost_bytes = oldest_seq - cursor
+//   cursor > W                 -> DC_EVLOG_CONSOLE_READ_FUTURE_CURSOR; nothing
+//                                 is copied and the cursor is never rewound
+//
+// All ranges are half-open. On success `out` holds exactly the ring bytes in
+// [start_seq, end_seq), unmodified and not NUL-terminated, and the next cursor
+// is end_seq. Loss is reported in raw bytes only; no line accounting.
+typedef enum {
+    DC_EVLOG_CONSOLE_READ_OK = 0,
+    DC_EVLOG_CONSOLE_READ_FUTURE_CURSOR,
+    DC_EVLOG_CONSOLE_READ_INVALID_ARG,
+} dc_evlog_console_read_status_t;
+
+typedef struct {
+    uint64_t cursor;      // requested cursor, as passed in
+    uint64_t oldest_seq;  // oldest retained byte at the time of the read
+    uint64_t start_seq;   // first byte copied (== end_seq when none)
+    uint64_t end_seq;     // one past the last byte copied; the next cursor
+    uint64_t write_seq;   // producer position observed by this read
+    uint64_t lost_bytes;  // start_seq - cursor
+    size_t   len;         // bytes copied == end_seq - start_seq
+    size_t   capacity;    // DC_EVLOG_CONSOLE_BYTES
+} dc_evlog_console_read_t;
+
+// Copies up to `max` bytes starting at `cursor` into `out` as one coherent
+// interval taken under a single short console critical section (the lock is
+// held only for the bounded copy). `out` may be NULL only when `max` is 0,
+// which yields a metadata-only probe. `info` is required.
+//
+// OK:             every field of *info is valid.
+// FUTURE_CURSOR:  cursor, oldest_seq, write_seq and capacity are valid;
+//                 start_seq, end_seq, lost_bytes and len are 0.
+// INVALID_ARG:    *info is zeroed when non-NULL.
+//
+// Callers should bound `max`: it bounds the critical-section copy length.
+dc_evlog_console_read_status_t dc_evlog_console_read(uint64_t cursor,
+                                                     char *out, size_t max,
+                                                     dc_evlog_console_read_t *info);
