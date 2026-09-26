@@ -1,6 +1,7 @@
 #include "dc_bambu.h"
 #include "dc_evlog.h"
 #include "dc_lighting.h"
+#include "dc_logtail.h"
 #include "dc_moonraker.h"
 #include "dc_mqtt.h"
 #include "dc_pid.h"
@@ -53,4 +54,9 @@ void app_main(void)
     (void)dc_ui_spa_asset();
     (void)dc_portal_start(NULL);
     (void)dc_portal_httpd();
+    // Metadata-only probe of the console cursor API, and an invalid
+    // registration that exercises dc_logtail without starting a server.
+    dc_evlog_console_read_t console_read = {0};
+    (void)dc_evlog_console_read(0, NULL, 0, &console_read);
+    (void)dc_logtail_register(NULL, &(dc_logtail_config_t){ .boot_id = "compile-test" });
 }
