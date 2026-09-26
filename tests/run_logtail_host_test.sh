@@ -37,4 +37,21 @@ cc -std=c11 -Wall -Wextra -Werror \
   -o "$out"
 
 "$out" || fail=1
+
+# The real request handler against a minimal esp_http_server fake that keeps
+# ESP-IDF's response-header slot semantics (tests/stubs_httpd).
+handler_out="${TMPDIR:-/tmp}/dragon-core-logtail-handler-test"
+cc -std=c11 -Wall -Wextra -Werror \
+  -I"$root/tests/stubs_httpd" \
+  -I"$root/tests/stubs" \
+  -I"$root/components/dc_evlog/include" \
+  -I"$root/components/dc_logtail" \
+  -I"$root/components/dc_logtail/include" \
+  "$root/tests/dc_logtail_handler_host_test.c" \
+  "$root/components/dc_logtail/dc_logtail.c" \
+  "$root/components/dc_logtail/dc_logtail_contract.c" \
+  "$root/components/dc_evlog/dc_evlog.c" \
+  -o "$handler_out"
+
+"$handler_out" || fail=1
 exit "$fail"
