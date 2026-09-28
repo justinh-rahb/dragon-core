@@ -46,5 +46,6 @@ static inline void dc_prusa_status_apply_freshness(dc_prusa_status_t *status,
         status->bed_temp = NAN;
         status->bed_target = 0.0f;
         status->printer_state[0] = '\0';
+        status->material[0] = '\0';
     }
 }

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include "dc_prusa.h"
 #include "dc_prusa_freshness.h"
+#include "dc_prusa_material.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -24,6 +25,9 @@ static const char *TAG = "dc_prusa";
 #define POLL_PERIOD_MS   5000         // socket-starved nhttp: 5 s comfortable
 #define HTTP_TIMEOUT_MS  4000
 #define RESP_MAX         1536         // /api/v1/status is ~300-400 B; generous
+#define JOB_RESP_MAX     4096         // /api/v1/job carries file.meta (larger)
+#define PRUSA_MAT_MAX    24           // filament_type token cap (matches status.material)
+#define PRUSA_TOOLS_MAX  5            // Prusa XL: up to 5 toolheads
 
 static SemaphoreHandle_t s_lock = NULL;
 static TaskHandle_t      s_task = NULL;
@@ -34,6 +38,7 @@ static dc_prusa_status_t s_status = {
     .bed_temp = NAN,
     .bed_target = 0.0f,
     .printer_state = "",
+    .material = "",
     .status_age_ms = UINT32_MAX,
 };
 static int64_t s_status_us = 0;  // monotonic timestamp of last complete status sample
@@ -137,6 +142,113 @@ static bool parse_status(const char *json)
     return ok;
 }
 
+// Response buffer for /api/v1/job (separate from s_resp: the job body carries
+// file.meta and is larger). Only the poll task touches it.
+static char s_job[JOB_RESP_MAX];
+
+// True for printer states where a filament is loaded and being laid down, so the
+// job's material is meaningful. PrusaLink reports PRINTING/PAUSED during a job.
+static bool state_is_printing(const char *state)
+{
+    return state && (strcmp(state, "PRINTING") == 0 || strcmp(state, "PAUSED") == 0);
+}
+
+// Parse a /api/v1/job body for the printing filament type into `out`. Reads
+// file.meta."filament_type" (scalar, single-toolhead) or, when a per-tool list is
+// present (Prusa XL), "filament_type per tool" indexed by the most-used slot from
+// "filament used [mm] per tool". Returns true and writes a non-empty token on
+// success; false leaves `out` untouched. Pure w.r.t. module state (no locking).
+static bool parse_job_material(const char *json, char *out, size_t out_sz)
+{
+    if (!json || !out || out_sz == 0) return false;
+    cJSON *root = cJSON_Parse(json);
+    if (!root) return false;
+
+    bool ok = false;
+    const char *picked = NULL;
+
+    cJSON *file = cJSON_GetObjectItemCaseSensitive(root, "file");
+    cJSON *meta = cJSON_IsObject(file)
+        ? cJSON_GetObjectItemCaseSensitive(file, "meta") : NULL;
+    if (cJSON_IsObject(meta)) {
+        // Multi-toolhead (XL): "filament_type per tool" + usage array; pick the
+        // printed slot (mirrors dc_moonraker #65). Falls through to the scalar.
+        cJSON *types = cJSON_GetObjectItemCaseSensitive(meta, "filament_type per tool");
+        if (cJSON_IsArray(types) && cJSON_GetArraySize(types) > 0) {
+            int count = cJSON_GetArraySize(types);
+            if (count > PRUSA_TOOLS_MAX) count = PRUSA_TOOLS_MAX;
+            float used[PRUSA_TOOLS_MAX];
+            bool used_known = false;
+            cJSON *usage = cJSON_GetObjectItemCaseSensitive(meta, "filament used [mm] per tool");
+            if (cJSON_IsArray(usage) && cJSON_GetArraySize(usage) >= count) {
+                used_known = true;
+                for (int i = 0; i < count; ++i) {
+                    cJSON *u = cJSON_GetArrayItem(usage, i);
+                    used[i] = cJSON_IsNumber(u) ? (float)u->valuedouble : 0.0f;
+                }
+            }
+            int idx = dc_prusa_pick_material_slot(count, used_known ? used : NULL,
+                                                  used_known);
+            if (idx >= 0) {
+                cJSON *t = cJSON_GetArrayItem(types, idx);
+                if (cJSON_IsString(t) && t->valuestring[0]) picked = t->valuestring;
+            }
+        }
+        // Scalar filament_type (single-toolhead, or fallback).
+        if (!picked) {
+            cJSON *ft = cJSON_GetObjectItemCaseSensitive(meta, "filament_type");
+            if (cJSON_IsString(ft) && ft->valuestring[0]) picked = ft->valuestring;
+        }
+    }
+
+    if (picked) {
+        strncpy(out, picked, out_sz - 1);
+        out[out_sz - 1] = '\0';
+        ok = true;
+    }
+    cJSON_Delete(root);
+    return ok;
+}
+
+// Fallback material parse from the LEGACY OctoPrint-compatible endpoint
+// `/api/printer`, which reports the loaded filament as `telemetry.material`. This
+// is the only reliable material signal when /api/v1/job carries no file.meta —
+// e.g. a file sent via PrusaLink onto USB, which PrusaLink does not parse. Writes
+// a non-empty token to `out` and returns true on success.
+static bool parse_printer_material(const char *json, char *out, size_t out_sz)
+{
+    if (!json || !out || out_sz == 0) return false;
+    cJSON *root = cJSON_Parse(json);
+    if (!root) return false;
+
+    bool ok = false;
+    cJSON *tel = cJSON_GetObjectItemCaseSensitive(root, "telemetry");
+    cJSON *mat = cJSON_IsObject(tel)
+        ? cJSON_GetObjectItemCaseSensitive(tel, "material") : NULL;
+    if (cJSON_IsString(mat) && mat->valuestring[0]
+            && strcmp(mat->valuestring, "---") != 0) {   // "---" = no filament loaded
+        strncpy(out, mat->valuestring, out_sz - 1);
+        out[out_sz - 1] = '\0';
+        ok = true;
+    }
+    cJSON_Delete(root);
+    return ok;
+}
+
+// Commit (or clear) the printing material under the lock, without disturbing the
+// status freshness timestamp — material rides the same sample as the bed data.
+static void commit_material(const char *material)
+{
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    if (material && material[0]) {
+        strncpy(s_status.material, material, sizeof(s_status.material) - 1);
+        s_status.material[sizeof(s_status.material) - 1] = '\0';
+    } else {
+        s_status.material[0] = '\0';
+    }
+    xSemaphoreGive(s_lock);
+}
+
 static void set_state(dc_prusa_state_t st)
 {
     xSemaphoreTake(s_lock, portMAX_DELAY);
@@ -144,8 +256,73 @@ static void set_state(dc_prusa_state_t st)
         ESP_LOGI(TAG, "%s -> %s", dc_prusa_state_str(s_status.state), dc_prusa_state_str(st));
     s_status.state = st;
     s_status.online = (st == DC_PRUSA_ONLINE);
-    if (st != DC_PRUSA_ONLINE) { s_status.bed_target = 0.0f; }   // fail-safe: don't hold a stale follow
+    if (st != DC_PRUSA_ONLINE) {
+        s_status.bed_target = 0.0f;      // fail-safe: don't hold a stale follow
+        s_status.material[0] = '\0';     // and don't hold a stale filament zone
+    }
     xSemaphoreGive(s_lock);
+}
+
+// GET `path` on the configured host into `buf`. Returns bytes read (>= 0) on HTTP
+// 200, or -1 on open failure / non-200 (e.g. 204 no-job). Sets auth + accept.
+static int http_get(esp_http_client_handle_t client, char *url, size_t url_sz,
+                    const dc_prusa_config_t *cfg, const char *path,
+                    char *buf, size_t buf_sz)
+{
+    snprintf(url, url_sz, "http://%s:%u%s", cfg->host, (unsigned)cfg->port, path);
+    buf[0] = '\0';
+    esp_http_client_set_url(client, url);
+    esp_http_client_set_method(client, HTTP_METHOD_GET);
+    esp_http_client_set_header(client, "X-Api-Key", cfg->api_key);
+    esp_http_client_set_header(client, "Accept", "application/json");
+    if (esp_http_client_open(client, 0) != ESP_OK) return -1;
+    esp_http_client_fetch_headers(client);
+    if (esp_http_client_get_status_code(client) != 200) {
+        esp_http_client_close(client);
+        return -1;
+    }
+    int total = 0, r;
+    while (total < (int)buf_sz - 1 &&
+           (r = esp_http_client_read(client, buf + total, (int)buf_sz - 1 - total)) > 0)
+        total += r;
+    buf[total > 0 ? total : 0] = '\0';
+    esp_http_client_close(client);
+    return total;
+}
+
+// Second poll step: resolve the printing filament, but only while a print is
+// active. Prefer the modern v1 /api/v1/job file.meta.filament_type (present for
+// PrusaLink-parsed files); when that is absent — e.g. a file sent onto USB, which
+// PrusaLink does not parse — fall back to the legacy /api/printer
+// telemetry.material (the only reliable signal in that case). Clears the material
+// (-> bed-follow) when neither reports one. Reuses the status poll's client + url.
+static void poll_job(esp_http_client_handle_t client, char *url, size_t url_sz,
+                     const dc_prusa_config_t *cfg)
+{
+    char state[sizeof(s_status.printer_state)];
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    strncpy(state, s_status.printer_state, sizeof(state) - 1);
+    state[sizeof(state) - 1] = '\0';
+    xSemaphoreGive(s_lock);
+    if (!state_is_printing(state)) { commit_material(NULL); return; }   // idle: no material
+
+    char material[PRUSA_MAT_MAX];
+
+    // 1) Modern v1 job metadata.
+    int n = http_get(client, url, url_sz, cfg, "/api/v1/job", s_job, JOB_RESP_MAX);
+    if (n > 0 && parse_job_material(s_job, material, sizeof(material))) {
+        commit_material(material);
+        return;
+    }
+
+    // 2) Legacy telemetry.material fallback (loaded filament, always present).
+    n = http_get(client, url, url_sz, cfg, "/api/printer", s_job, JOB_RESP_MAX);
+    if (n > 0 && parse_printer_material(s_job, material, sizeof(material))) {
+        commit_material(material);
+        return;
+    }
+
+    commit_material(NULL);   // neither endpoint reported a filament -> bed-follow
 }
 
 static void poll_once(esp_http_client_handle_t client, char *url, size_t url_sz)
@@ -184,6 +361,13 @@ static void poll_once(esp_http_client_handle_t client, char *url, size_t url_sz)
     // answers 200 with non-JSON must never look like a connected printer.
     if (total <= 0 || !parse_status(s_resp)) { set_state(DC_PRUSA_OFFLINE); return; }
     set_state(DC_PRUSA_ONLINE);
+    // Material detection is a SEPARATE, best-effort step run AFTER the source is
+    // already ONLINE. It only ever writes s_status.material (never state, bed data,
+    // or the freshness timestamp), so a missing/renamed/removed job-or-printer
+    // endpoint, an unparseable body, or a future PrusaLink that drops the legacy
+    // API simply yields no material and AUTO falls back to bed-follow — the source
+    // stays online and the chamber keeps working. Forward-compatible by design.
+    poll_job(client, url, url_sz, &cfg);
 }
 
 static void poll_task(void *arg)

@@ -1,11 +1,38 @@
-// Host unit test for dc_prusa status freshness and fail-cold filtering.
+// Host unit test for dc_prusa status freshness/fail-cold filtering and the
+// per-tool filament-slot pick used for /api/v1/job material detection.
 #include "dc_prusa_freshness.h"
+#include "dc_prusa_material.h"
 
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
 
 static int fails = 0;
+
+static void expect_pick(const char *name, int count, const float *used,
+                        bool used_known, int want)
+{
+    int got = dc_prusa_pick_material_slot(count, used, used_known);
+    int ok = got == want;
+    if (!ok) fails++;
+    printf("[%s] pick %-22s want=%d got=%d\n", ok ? "PASS" : "FAIL",
+           name, want, got);
+}
+
+// Material rides the status sample: retained while fresh, cleared when stale.
+static void expect_material(const char *name, int64_t now_us, int64_t sample_us,
+                            const char *want)
+{
+    dc_prusa_status_t status = { .state = DC_PRUSA_ONLINE, .online = true,
+                                 .bed_temp = 56.0f, .bed_target = 70.0f };
+    strcpy(status.printer_state, "PRINTING");
+    strcpy(status.material, "PETG");
+    dc_prusa_status_apply_freshness(&status, now_us, sample_us);
+    int ok = strcmp(status.material, want) == 0;
+    if (!ok) fails++;
+    printf("[%s] material %-16s want=\"%s\" got=\"%s\"\n", ok ? "PASS" : "FAIL",
+           name, want, status.material);
+}
 
 static void expect_fresh(const char *name, int64_t now_us, int64_t sample_us, int want)
 {
@@ -83,6 +110,25 @@ int main(void)
     expect_snapshot("clock rollback", populated(DC_PRUSA_ONLINE, true),
                     999999LL, 1000000LL,
                     DC_PRUSA_ONLINE, 1, 1, 0);
+
+    // Material rides the status sample.
+    expect_material("fresh keeps",  2000000LL, 1000000LL, "PETG");
+    expect_material("stale clears", 16001000LL, 1000000LL, "");
+
+    // Per-tool filament pick for /api/v1/job "filament_type per tool".
+    expect_pick("no slots",         0,  NULL, false, -1);
+    expect_pick("single no usage",  1,  NULL, false,  0);
+    float u_slot1[] = {0.0f, 939.9f, 0.0f, 0.0f};   // XL: only tool 1 printed
+    expect_pick("multi tool1 used", 4,  u_slot1, true, 1);
+    float u_slot0[] = {512.0f, 0.0f};                // primary tool printed
+    expect_pick("multi tool0 used", 2,  u_slot0, true, 0);
+    float u_slot3[] = {0.0f, 0.0f, 0.0f, 88.1f};     // last of four
+    expect_pick("multi tool3 used", 4,  u_slot3, true, 3);
+    float u_none[]  = {0.0f, 0.0f};                   // usage present but all zero
+    expect_pick("usage all zero",   2,  u_none, true, 0);
+    float u_multi[] = {10.0f, 200.0f};               // most-used wins
+    expect_pick("most used wins",   2,  u_multi, true, 1);
+    expect_pick("array no usage",   3,  NULL, false,  0);   // usage unknown -> slot 0
 
     printf(fails ? "\n%d FAILED\n" : "\nALL PASS\n", fails);
     return fails ? 1 : 0;
