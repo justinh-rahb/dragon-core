@@ -2,6 +2,7 @@
 #include "dc_prusa.h"
 #include "dc_prusa_freshness.h"
 #include "dc_prusa_material.h"
+#include "dc_prusa_parse.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -23,11 +24,18 @@ static const char *TAG = "dc_prusa";
 #define KEY_APIKEY    "pr_key"
 
 #define POLL_PERIOD_MS   5000         // socket-starved nhttp: 5 s comfortable
-#define HTTP_TIMEOUT_MS  4000
+#define HTTP_TIMEOUT_MS  4000         // /api/v1/status (the freshness-critical poll)
+// Material polling (/api/v1/job + /api/printer) runs AFTER the status stamp, so its
+// wall-clock time delays the next status refresh and must not push the gap past the
+// 15 s freshness window. Budget: 2 material requests + poll delay + next status fetch
+// must stay under DC_PRUSA_STATUS_STALE_US. With a 2 s material timeout the worst case
+// is 2*2 + 5 (POLL_PERIOD) + 4 (HTTP_TIMEOUT) = 13 s < 15 s, even if both material
+// endpoints time out every cycle. A separate, tighter deadline than the status poll.
+#define MATERIAL_TIMEOUT_MS 2000
 #define RESP_MAX         1536         // /api/v1/status is ~300-400 B; generous
 #define JOB_RESP_MAX     4096         // /api/v1/job carries file.meta (larger)
-#define PRUSA_MAT_MAX    24           // filament_type token cap (matches status.material)
-#define PRUSA_TOOLS_MAX  5            // Prusa XL: up to 5 toolheads
+// Material token cap + per-tool max live in dc_prusa_parse.h (DC_PRUSA_MAT_MAX /
+// DC_PRUSA_TOOLS_MAX) so the parsers and their host test share one definition.
 
 static SemaphoreHandle_t s_lock = NULL;
 static TaskHandle_t      s_task = NULL;
@@ -153,87 +161,9 @@ static bool state_is_printing(const char *state)
     return state && (strcmp(state, "PRINTING") == 0 || strcmp(state, "PAUSED") == 0);
 }
 
-// Parse a /api/v1/job body for the printing filament type into `out`. Reads
-// file.meta."filament_type" (scalar, single-toolhead) or, when a per-tool list is
-// present (Prusa XL), "filament_type per tool" indexed by the most-used slot from
-// "filament used [mm] per tool". Returns true and writes a non-empty token on
-// success; false leaves `out` untouched. Pure w.r.t. module state (no locking).
-static bool parse_job_material(const char *json, char *out, size_t out_sz)
-{
-    if (!json || !out || out_sz == 0) return false;
-    cJSON *root = cJSON_Parse(json);
-    if (!root) return false;
-
-    bool ok = false;
-    const char *picked = NULL;
-
-    cJSON *file = cJSON_GetObjectItemCaseSensitive(root, "file");
-    cJSON *meta = cJSON_IsObject(file)
-        ? cJSON_GetObjectItemCaseSensitive(file, "meta") : NULL;
-    if (cJSON_IsObject(meta)) {
-        // Multi-toolhead (XL): "filament_type per tool" + usage array; pick the
-        // printed slot (mirrors dc_moonraker #65). Falls through to the scalar.
-        cJSON *types = cJSON_GetObjectItemCaseSensitive(meta, "filament_type per tool");
-        if (cJSON_IsArray(types) && cJSON_GetArraySize(types) > 0) {
-            int count = cJSON_GetArraySize(types);
-            if (count > PRUSA_TOOLS_MAX) count = PRUSA_TOOLS_MAX;
-            float used[PRUSA_TOOLS_MAX];
-            bool used_known = false;
-            cJSON *usage = cJSON_GetObjectItemCaseSensitive(meta, "filament used [mm] per tool");
-            if (cJSON_IsArray(usage) && cJSON_GetArraySize(usage) >= count) {
-                used_known = true;
-                for (int i = 0; i < count; ++i) {
-                    cJSON *u = cJSON_GetArrayItem(usage, i);
-                    used[i] = cJSON_IsNumber(u) ? (float)u->valuedouble : 0.0f;
-                }
-            }
-            int idx = dc_prusa_pick_material_slot(count, used_known ? used : NULL,
-                                                  used_known);
-            if (idx >= 0) {
-                cJSON *t = cJSON_GetArrayItem(types, idx);
-                if (cJSON_IsString(t) && t->valuestring[0]) picked = t->valuestring;
-            }
-        }
-        // Scalar filament_type (single-toolhead, or fallback).
-        if (!picked) {
-            cJSON *ft = cJSON_GetObjectItemCaseSensitive(meta, "filament_type");
-            if (cJSON_IsString(ft) && ft->valuestring[0]) picked = ft->valuestring;
-        }
-    }
-
-    if (picked) {
-        strncpy(out, picked, out_sz - 1);
-        out[out_sz - 1] = '\0';
-        ok = true;
-    }
-    cJSON_Delete(root);
-    return ok;
-}
-
-// Fallback material parse from the LEGACY OctoPrint-compatible endpoint
-// `/api/printer`, which reports the loaded filament as `telemetry.material`. This
-// is the only reliable material signal when /api/v1/job carries no file.meta —
-// e.g. a file sent via PrusaLink onto USB, which PrusaLink does not parse. Writes
-// a non-empty token to `out` and returns true on success.
-static bool parse_printer_material(const char *json, char *out, size_t out_sz)
-{
-    if (!json || !out || out_sz == 0) return false;
-    cJSON *root = cJSON_Parse(json);
-    if (!root) return false;
-
-    bool ok = false;
-    cJSON *tel = cJSON_GetObjectItemCaseSensitive(root, "telemetry");
-    cJSON *mat = cJSON_IsObject(tel)
-        ? cJSON_GetObjectItemCaseSensitive(tel, "material") : NULL;
-    if (cJSON_IsString(mat) && mat->valuestring[0]
-            && strcmp(mat->valuestring, "---") != 0) {   // "---" = no filament loaded
-        strncpy(out, mat->valuestring, out_sz - 1);
-        out[out_sz - 1] = '\0';
-        ok = true;
-    }
-    cJSON_Delete(root);
-    return ok;
-}
+// The /api/v1/job and /api/printer material parsers are pure and live in
+// dc_prusa_parse.h (dc_prusa_parse_job_material / dc_prusa_parse_printer_material)
+// so they can be host-tested against real payloads. See tests/.
 
 // Commit (or clear) the printing material under the lock, without disturbing the
 // status freshness timestamp — material rides the same sample as the bed data.
@@ -264,13 +194,16 @@ static void set_state(dc_prusa_state_t st)
 }
 
 // GET `path` on the configured host into `buf`. Returns bytes read (>= 0) on HTTP
-// 200, or -1 on open failure / non-200 (e.g. 204 no-job). Sets auth + accept.
+// 200, or -1 on open failure / non-200 (e.g. 204 no-job). Sets auth + accept. Used
+// only for the best-effort MATERIAL requests, so it runs on the tighter
+// MATERIAL_TIMEOUT_MS deadline to protect status freshness (see the macro).
 static int http_get(esp_http_client_handle_t client, char *url, size_t url_sz,
                     const dc_prusa_config_t *cfg, const char *path,
                     char *buf, size_t buf_sz)
 {
     snprintf(url, url_sz, "http://%s:%u%s", cfg->host, (unsigned)cfg->port, path);
     buf[0] = '\0';
+    esp_http_client_set_timeout_ms(client, MATERIAL_TIMEOUT_MS);
     esp_http_client_set_url(client, url);
     esp_http_client_set_method(client, HTTP_METHOD_GET);
     esp_http_client_set_header(client, "X-Api-Key", cfg->api_key);
@@ -295,7 +228,7 @@ static int http_get(esp_http_client_handle_t client, char *url, size_t url_sz,
 // PrusaLink-parsed files); when that is absent — e.g. a file sent onto USB, which
 // PrusaLink does not parse — fall back to the legacy /api/printer
 // telemetry.material (the only reliable signal in that case). Clears the material
-// (-> bed-follow) when neither reports one. Reuses the status poll's client + url.
+// (-> AUTO idle) when neither reports one. Reuses the status poll's client + url.
 static void poll_job(esp_http_client_handle_t client, char *url, size_t url_sz,
                      const dc_prusa_config_t *cfg)
 {
@@ -306,23 +239,23 @@ static void poll_job(esp_http_client_handle_t client, char *url, size_t url_sz,
     xSemaphoreGive(s_lock);
     if (!state_is_printing(state)) { commit_material(NULL); return; }   // idle: no material
 
-    char material[PRUSA_MAT_MAX];
+    char material[DC_PRUSA_MAT_MAX];
 
     // 1) Modern v1 job metadata.
     int n = http_get(client, url, url_sz, cfg, "/api/v1/job", s_job, JOB_RESP_MAX);
-    if (n > 0 && parse_job_material(s_job, material, sizeof(material))) {
+    if (n > 0 && dc_prusa_parse_job_material(s_job, material, sizeof(material))) {
         commit_material(material);
         return;
     }
 
     // 2) Legacy telemetry.material fallback (loaded filament, always present).
     n = http_get(client, url, url_sz, cfg, "/api/printer", s_job, JOB_RESP_MAX);
-    if (n > 0 && parse_printer_material(s_job, material, sizeof(material))) {
+    if (n > 0 && dc_prusa_parse_printer_material(s_job, material, sizeof(material))) {
         commit_material(material);
         return;
     }
 
-    commit_material(NULL);   // neither endpoint reported a filament -> bed-follow
+    commit_material(NULL);   // neither endpoint reported a filament -> no material (AUTO idle)
 }
 
 static void poll_once(esp_http_client_handle_t client, char *url, size_t url_sz)
@@ -335,6 +268,9 @@ static void poll_once(esp_http_client_handle_t client, char *url, size_t url_sz)
     snprintf(url, url_sz, "http://%s:%u/api/v1/status", cfg.host, (unsigned)cfg.port);
     s_resp[0] = '\0';
 
+    // Restore the full status deadline — http_get() (material) lowers the shared
+    // client to MATERIAL_TIMEOUT_MS, and status is the freshness-critical poll.
+    esp_http_client_set_timeout_ms(client, HTTP_TIMEOUT_MS);
     esp_http_client_set_url(client, url);
     esp_http_client_set_method(client, HTTP_METHOD_GET);
     esp_http_client_set_header(client, "X-Api-Key", cfg.api_key);
@@ -363,10 +299,11 @@ static void poll_once(esp_http_client_handle_t client, char *url, size_t url_sz)
     set_state(DC_PRUSA_ONLINE);
     // Material detection is a SEPARATE, best-effort step run AFTER the source is
     // already ONLINE. It only ever writes s_status.material (never state, bed data,
-    // or the freshness timestamp), so a missing/renamed/removed job-or-printer
-    // endpoint, an unparseable body, or a future PrusaLink that drops the legacy
-    // API simply yields no material and AUTO falls back to bed-follow — the source
-    // stays online and the chamber keeps working. Forward-compatible by design.
+    // or the freshness timestamp), and it runs on a tighter MATERIAL_TIMEOUT_MS
+    // deadline so it cannot delay the next status poll past the freshness window.
+    // So a missing/renamed/removed job-or-printer endpoint, an unparseable body, or
+    // a future PrusaLink that drops the legacy API simply yields no material (AUTO
+    // goes idle) — the source stays online and connected. Forward-compatible by design.
     poll_job(client, url, url_sz, &cfg);
 }
 
