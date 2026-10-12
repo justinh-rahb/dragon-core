@@ -774,9 +774,9 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
         </div>
       </section>
 
-      <!-- Automatic: follow the printer bed above a threshold (auto command). -->
+      <!-- Automatic: follow the selected printer source (bed or filament zones). -->
       <section class="page-only mode-controls" data-page-content="auto" data-capability="auto">
-        <p id="a-desc"><strong>Automatic mode:</strong> while a print runs, the chamber follows the loaded filament's profile — set the per-filament targets in <strong>Filament Zones</strong> on the dashboard. With no print, or a filament that has no zone set, the chamber stays idle. Requires a connected printer (Klipper or Bambu).</p>
+        <p id="a-desc"><strong>Automatic mode:</strong> while a print runs, the chamber follows the loaded filament's profile — set the per-filament targets in <strong>Filament Zones</strong> on the dashboard. With no print, or a filament that has no zone set, the chamber stays idle. Requires a connected printer (PrusaLink, Klipper, or Bambu).</p>
         <div class="ctl-group" hidden>
           <div class="ctl-head">
             <span class="form-label">Chamber target</span>
@@ -868,7 +868,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
         </div>
 
         <!-- Filament chamber zones: shown when the control source follows filament
-             profiles (Bambu or Klipper). Edits apply live via /api/v2/zones (no reboot). -->
+             profiles (PrusaLink, Bambu, or Klipper). Edits apply live via /api/v2/zones (no reboot). -->
         <div class="set-card zones-card" id="zones-card" hidden>
           <h3><svg class="icon"><use href="#i-spool"/></svg> Filament zones</h3>
           <p class="set-note">Chamber target per filament; zones apply only in <b>AUTO</b> (°C, 0 = off). Zones do nothing in Manual/Off.</p>
@@ -1856,8 +1856,8 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     return s.mode==='off' ? '—' : sourceLabel(s.source);
   }
 
-  /* Filament chamber zones (Bambu only). Fetched once when the Bambu card first
-     shows; each input edit is applied live via POST /api/v2/zones (no reboot). */
+  /* Filament chamber zones. Fetched once when a filament-aware source first
+     shows them; each input edit is applied live via POST /api/v2/zones (no reboot). */
   var zonesLoaded = false, zonesCustomMax = 8;
   function esc(t){ return String(t).replace(/[<>&"]/g, function(ch){
     return {'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[ch]; }); }
@@ -2325,24 +2325,25 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     var dryRow = s.drying.active;
     $('db-drying-row').hidden = !dryRow;
     if(dryRow) u('db-drying', fmtDur(s.drying.remaining_seconds)+' left');
-    /* Printer/source row is source-aware: Klipper/Bambu follow a printer bed (show
+    /* Printer/source row is source-aware: PrusaLink, Klipper, and Bambu report a bed (show
        link + bed); Home Assistant has no printer to follow (HA is the controller),
        so relabel the row and show the source instead of a misleading "not connected". */
     var src = s.environment.control_source || 'klipper';
     var isBambu = (src==='bambu');
     /* Filament chamber zones apply to any bed source that reports the active
-       filament — Bambu and Klipper (Moonraker). But when the Klipper [dragonbreath]
+       filament — PrusaLink, Bambu, and Klipper (Moonraker). But when the Klipper [dragonbreath]
        helper is active it owns chamber heat directly (M141/M191), AUTO is
        unavailable, and the zones — which only feed AUTO — are inert, so hide both
        zone cards too. Bambu is unaffected: klipper_helper_present is only ever set
        on the Klipper/Moonraker source. */
-    var usesZones = (isBambu || (src==='klipper')) && !s.environment.klipper_helper_present;
+    var isPrusa = (src==='prusa');
+    var usesZones = (isPrusa || isBambu || (src==='klipper')) && !s.environment.klipper_helper_present;
     var zc = document.getElementById('zones-card');
     var zcc = document.getElementById('zones-custom-card');
     if(zc){ zc.hidden = !usesZones; if(usesZones) loadZones(); }
     if(zcc) zcc.hidden = !usesZones;
     /* Show the active print's filament in the status card (Bambu bambu_filament,
-       Klipper material). */
+       PrusaLink/Klipper material). */
     var frow = $('db-filament-row');
     if(frow){
       var fila = isBambu ? (s.environment.bambu_printing ? s.environment.bambu_filament : null)
@@ -2586,8 +2587,8 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
   }
   function renderAuto(s){
     var armed = s.mode==='auto', eng = s.environment.auto_engaged;
-    // Source capability: bed-follow sources (Prusa) set the chamber via the bed
-    // threshold + target controls below; filament-aware sources (Klipper/Bambu)
+    // Source capability: bed-follow sources set the chamber via the bed threshold
+    // + target controls below; filament-aware sources (PrusaLink/Klipper/Bambu)
     // follow the loaded filament's zone. Toggle the AUTO card to match the source.
     var bedFollow = isBedFollow(s);
     var tgtGrp = document.getElementById('a-range').closest('.ctl-group');
@@ -2597,7 +2598,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     var desc = document.getElementById('a-desc');
     if(desc) desc.innerHTML = bedFollow
       ? '<strong>Automatic mode:</strong> the chamber follows the printer’s bed — while a print runs it heats to the <strong>Chamber target</strong> once the bed setpoint reaches the <strong>Bed threshold</strong> below. Your printer reports no filament type, so set the bed→chamber rule here.'
-      : '<strong>Automatic mode:</strong> while a print runs, the chamber follows the loaded filament’s profile — set the per-filament targets in <strong>Filament Zones</strong> on the dashboard. With no print, or a filament that has no zone set, the chamber stays idle. Requires a connected printer (Klipper or Bambu).';
+      : '<strong>Automatic mode:</strong> while a print runs, the chamber follows the loaded filament’s profile — set the per-filament targets in <strong>Filament Zones</strong> on the dashboard. With no print, or a filament that has no zone set, the chamber stays idle. Requires a connected printer (PrusaLink, Klipper, or Bambu).';
     var actBtn = $('a-action');
     // The dragonbreath-klipper extension is itself an active chamber controller, so
     // AUTO can't run alongside it. Make that visible: block arming and say why. If
