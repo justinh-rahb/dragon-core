@@ -1,6 +1,7 @@
 // Host unit test for dc_prusa status freshness/fail-cold filtering and the
 // per-tool filament-slot pick used for /api/v1/job material detection.
 #include "dc_prusa_freshness.h"
+#include "dc_prusa_deadline.h"
 #include "dc_prusa_material.h"
 
 #include <math.h>
@@ -43,6 +44,16 @@ static void expect_fresh(const char *name, int64_t now_us, int64_t sample_us, in
            name, want, got);
 }
 
+static void expect_deadline_timeout(const char *name, int64_t deadline_us,
+                                    int64_t now_us, int want_ms)
+{
+    int got_ms = dc_prusa_deadline_timeout_ms(deadline_us, now_us);
+    int ok = got_ms == want_ms;
+    if (!ok) fails++;
+    printf("[%s] deadline %-18s want=%d got=%d\n", ok ? "PASS" : "FAIL",
+           name, want_ms, got_ms);
+}
+
 static void expect_snapshot(const char *name,
                             dc_prusa_status_t status,
                             int64_t now_us,
@@ -82,6 +93,14 @@ static dc_prusa_status_t populated(dc_prusa_state_t state, bool online)
 
 int main(void)
 {
+    // Material HTTP operations share a monotonic deadline. Millisecond timeout
+    // rounding must never extend it, and sub-ms/expired budgets stop immediately.
+    expect_deadline_timeout("full budget", 5000000LL, 1000000LL, 4000);
+    expect_deadline_timeout("fractional ms", 5000000LL, 1000001LL, 3999);
+    expect_deadline_timeout("sub-ms left", 1000999LL, 1000000LL, 0);
+    expect_deadline_timeout("deadline reached", 1000000LL, 1000000LL, 0);
+    expect_deadline_timeout("deadline passed", 999999LL, 1000000LL, 0);
+
     // Timeout boundary: exactly 15 s remains fresh; the first microsecond after
     // it is stale. A backwards monotonic clock is clamped to age zero.
     expect_fresh("never received", 1000000LL, 0, 0);

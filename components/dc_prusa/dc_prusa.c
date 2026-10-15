@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include "dc_prusa.h"
 #include "dc_prusa_freshness.h"
+#include "dc_prusa_deadline.h"
 #include "dc_prusa_material.h"
 #include "dc_prusa_parse.h"
 
@@ -27,11 +28,10 @@ static const char *TAG = "dc_prusa";
 #define HTTP_TIMEOUT_MS  4000         // /api/v1/status (the freshness-critical poll)
 // Material polling (/api/v1/job + /api/printer) runs AFTER the status stamp, so its
 // wall-clock time delays the next status refresh and must not push the gap past the
-// 15 s freshness window. Budget: 2 material requests + poll delay + next status fetch
-// must stay under DC_PRUSA_STATUS_STALE_US. With a 2 s material timeout the worst case
-// is 2*2 + 5 (POLL_PERIOD) + 4 (HTTP_TIMEOUT) = 13 s < 15 s, even if both material
-// endpoints time out every cycle. A separate, tighter deadline than the status poll.
-#define MATERIAL_TIMEOUT_MS 2000
+// 15 s freshness window. Give both material requests one shared 4 s wall-clock budget;
+// together with the 5 s poll delay and 4 s next status request this keeps the worst
+// case at 13 s. Each blocking HTTP phase is limited to the remaining budget.
+#define MATERIAL_BUDGET_MS 4000
 #define RESP_MAX         1536         // /api/v1/status is ~300-400 B; generous
 #define JOB_RESP_MAX     4096         // /api/v1/job carries file.meta (larger)
 // Material token cap + per-tool max live in dc_prusa_parse.h (DC_PRUSA_MAT_MAX /
@@ -194,30 +194,48 @@ static void set_state(dc_prusa_state_t st)
 }
 
 // GET `path` on the configured host into `buf`. Returns bytes read (>= 0) on HTTP
-// 200, or -1 on open failure / non-200 (e.g. 204 no-job). Sets auth + accept. Used
-// only for the best-effort MATERIAL requests, so it runs on the tighter
-// MATERIAL_TIMEOUT_MS deadline to protect status freshness (see the macro).
+// 200, or -1 on timeout, open/read failure, or non-200 (e.g. 204 no-job). `deadline_us`
+// is shared by both material requests, so repeated reads cannot each consume a fresh
+// full timeout and overrun the status freshness budget.
 static int http_get(esp_http_client_handle_t client, char *url, size_t url_sz,
                     const dc_prusa_config_t *cfg, const char *path,
-                    char *buf, size_t buf_sz)
+                    char *buf, size_t buf_sz, int64_t deadline_us)
 {
     snprintf(url, url_sz, "http://%s:%u%s", cfg->host, (unsigned)cfg->port, path);
     buf[0] = '\0';
-    esp_http_client_set_timeout_ms(client, MATERIAL_TIMEOUT_MS);
     esp_http_client_set_url(client, url);
     esp_http_client_set_method(client, HTTP_METHOD_GET);
     esp_http_client_set_header(client, "X-Api-Key", cfg->api_key);
     esp_http_client_set_header(client, "Accept", "application/json");
+    int timeout_ms = dc_prusa_deadline_timeout_ms(deadline_us, esp_timer_get_time());
+    if (timeout_ms <= 0) return -1;
+    esp_http_client_set_timeout_ms(client, timeout_ms);
     if (esp_http_client_open(client, 0) != ESP_OK) return -1;
-    esp_http_client_fetch_headers(client);
+    timeout_ms = dc_prusa_deadline_timeout_ms(deadline_us, esp_timer_get_time());
+    if (timeout_ms <= 0) { esp_http_client_close(client); return -1; }
+    esp_http_client_set_timeout_ms(client, timeout_ms);
+    if (esp_http_client_fetch_headers(client) < 0) {
+        esp_http_client_close(client);
+        return -1;
+    }
     if (esp_http_client_get_status_code(client) != 200) {
         esp_http_client_close(client);
         return -1;
     }
-    int total = 0, r;
-    while (total < (int)buf_sz - 1 &&
-           (r = esp_http_client_read(client, buf + total, (int)buf_sz - 1 - total)) > 0)
+    int total = 0, r = 0;
+    while (total < (int)buf_sz - 1) {
+        timeout_ms = dc_prusa_deadline_timeout_ms(deadline_us, esp_timer_get_time());
+        if (timeout_ms <= 0) { esp_http_client_close(client); return -1; }
+        esp_http_client_set_timeout_ms(client, timeout_ms);
+        r = esp_http_client_read(client, buf + total, (int)buf_sz - 1 - total);
+        if (r <= 0) break;
         total += r;
+    }
+    if (r < 0 || total >= (int)buf_sz - 1 ||
+        dc_prusa_deadline_timeout_ms(deadline_us, esp_timer_get_time()) <= 0) {
+        esp_http_client_close(client);
+        return -1;
+    }
     buf[total > 0 ? total : 0] = '\0';
     esp_http_client_close(client);
     return total;
@@ -232,6 +250,7 @@ static int http_get(esp_http_client_handle_t client, char *url, size_t url_sz,
 static void poll_job(esp_http_client_handle_t client, char *url, size_t url_sz,
                      const dc_prusa_config_t *cfg)
 {
+    int64_t deadline_us = esp_timer_get_time() + (int64_t)MATERIAL_BUDGET_MS * 1000;
     char state[sizeof(s_status.printer_state)];
     xSemaphoreTake(s_lock, portMAX_DELAY);
     strncpy(state, s_status.printer_state, sizeof(state) - 1);
@@ -242,14 +261,16 @@ static void poll_job(esp_http_client_handle_t client, char *url, size_t url_sz,
     char material[DC_PRUSA_MAT_MAX];
 
     // 1) Modern v1 job metadata.
-    int n = http_get(client, url, url_sz, cfg, "/api/v1/job", s_job, JOB_RESP_MAX);
+    int n = http_get(client, url, url_sz, cfg, "/api/v1/job", s_job, JOB_RESP_MAX,
+                     deadline_us);
     if (n > 0 && dc_prusa_parse_job_material(s_job, material, sizeof(material))) {
         commit_material(material);
         return;
     }
 
     // 2) Legacy telemetry.material fallback (loaded filament, always present).
-    n = http_get(client, url, url_sz, cfg, "/api/printer", s_job, JOB_RESP_MAX);
+    n = http_get(client, url, url_sz, cfg, "/api/printer", s_job, JOB_RESP_MAX,
+                 deadline_us);
     if (n > 0 && dc_prusa_parse_printer_material(s_job, material, sizeof(material))) {
         commit_material(material);
         return;
@@ -268,8 +289,8 @@ static void poll_once(esp_http_client_handle_t client, char *url, size_t url_sz)
     snprintf(url, url_sz, "http://%s:%u/api/v1/status", cfg.host, (unsigned)cfg.port);
     s_resp[0] = '\0';
 
-    // Restore the full status deadline — http_get() (material) lowers the shared
-    // client to MATERIAL_TIMEOUT_MS, and status is the freshness-critical poll.
+    // Restore the full status timeout — http_get() (material) lowers the shared
+    // client's per-operation timeout to its remaining material-poll budget.
     esp_http_client_set_timeout_ms(client, HTTP_TIMEOUT_MS);
     esp_http_client_set_url(client, url);
     esp_http_client_set_method(client, HTTP_METHOD_GET);
@@ -299,8 +320,8 @@ static void poll_once(esp_http_client_handle_t client, char *url, size_t url_sz)
     set_state(DC_PRUSA_ONLINE);
     // Material detection is a SEPARATE, best-effort step run AFTER the source is
     // already ONLINE. It only ever writes s_status.material (never state, bed data,
-    // or the freshness timestamp), and it runs on a tighter MATERIAL_TIMEOUT_MS
-    // deadline so it cannot delay the next status poll past the freshness window.
+    // or the freshness timestamp), and both requests share a wall-clock budget so
+    // they cannot delay the next status poll past the freshness window.
     // So a missing/renamed/removed job-or-printer endpoint, an unparseable body, or
     // a future PrusaLink that drops the legacy API simply yields no material (AUTO
     // goes idle) — the source stays online and connected. Forward-compatible by design.
