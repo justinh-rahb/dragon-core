@@ -52,9 +52,8 @@ typedef struct {
     float bed_temp;             // printer.temp_bed (°C); NaN if never read
     float bed_target;           // printer.target_bed (°C; 0 = bed off)
     char  printer_state[12];    // printer.state ("IDLE"/"PRINTING"/...)
-    char  material[24];         // printing filament type from /api/v1/job
-                                // (file.meta.filament_type); empty when not
-                                // printing or the job has no filament metadata
+    char  material[24];         // printing filament type from PrusaLink; empty when
+                                // not printing, unavailable, or its sample is stale
     uint32_t status_age_ms;      // age of last complete status; UINT32_MAX if unavailable
 } dc_prusa_status_t;
 

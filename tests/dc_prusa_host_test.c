@@ -1,7 +1,6 @@
 // Host unit test for dc_prusa status freshness/fail-cold filtering and the
 // per-tool filament-slot pick used for /api/v1/job material detection.
 #include "dc_prusa_freshness.h"
-#include "dc_prusa_deadline.h"
 #include "dc_prusa_material.h"
 
 #include <math.h>
@@ -20,15 +19,18 @@ static void expect_pick(const char *name, int count, const float *used,
            name, want, got);
 }
 
-// Material rides the status sample: retained while fresh, cleared when stale.
-static void expect_material(const char *name, int64_t now_us, int64_t sample_us,
+// Material has its own age so a stalled material worker expires it while the
+// independent status sample remains fresh.
+static void expect_material(const char *name, int64_t now_us,
+                            int64_t status_sample_us, int64_t material_sample_us,
                             const char *want)
 {
     dc_prusa_status_t status = { .state = DC_PRUSA_ONLINE, .online = true,
                                  .bed_temp = 56.0f, .bed_target = 70.0f };
     strcpy(status.printer_state, "PRINTING");
     strcpy(status.material, "PETG");
-    dc_prusa_status_apply_freshness(&status, now_us, sample_us);
+    dc_prusa_status_apply_freshness(&status, now_us, status_sample_us);
+    dc_prusa_material_apply_freshness(&status, now_us, material_sample_us);
     int ok = strcmp(status.material, want) == 0;
     if (!ok) fails++;
     printf("[%s] material %-16s want=\"%s\" got=\"%s\"\n", ok ? "PASS" : "FAIL",
@@ -44,14 +46,18 @@ static void expect_fresh(const char *name, int64_t now_us, int64_t sample_us, in
            name, want, got);
 }
 
-static void expect_deadline_timeout(const char *name, int64_t deadline_us,
-                                    int64_t now_us, int want_ms)
+static void expect_material_result_current(const char *name,
+                                          int64_t response_sample_us,
+                                          int64_t current_sample_us,
+                                          bool online, bool printing, int want)
 {
-    int got_ms = dc_prusa_deadline_timeout_ms(deadline_us, now_us);
-    int ok = got_ms == want_ms;
+    int got = dc_prusa_material_result_current(response_sample_us,
+                                               current_sample_us,
+                                               online, printing);
+    int ok = got == want;
     if (!ok) fails++;
-    printf("[%s] deadline %-18s want=%d got=%d\n", ok ? "PASS" : "FAIL",
-           name, want_ms, got_ms);
+    printf("[%s] material result %-16s want=%d got=%d\n", ok ? "PASS" : "FAIL",
+           name, want, got);
 }
 
 static void expect_snapshot(const char *name,
@@ -93,14 +99,6 @@ static dc_prusa_status_t populated(dc_prusa_state_t state, bool online)
 
 int main(void)
 {
-    // Material HTTP operations share a monotonic deadline. Millisecond timeout
-    // rounding must never extend it, and sub-ms/expired budgets stop immediately.
-    expect_deadline_timeout("full budget", 5000000LL, 1000000LL, 4000);
-    expect_deadline_timeout("fractional ms", 5000000LL, 1000001LL, 3999);
-    expect_deadline_timeout("sub-ms left", 1000999LL, 1000000LL, 0);
-    expect_deadline_timeout("deadline reached", 1000000LL, 1000000LL, 0);
-    expect_deadline_timeout("deadline passed", 999999LL, 1000000LL, 0);
-
     // Timeout boundary: exactly 15 s remains fresh; the first microsecond after
     // it is stale. A backwards monotonic clock is clamped to age zero.
     expect_fresh("never received", 1000000LL, 0, 0);
@@ -109,6 +107,17 @@ int main(void)
     expect_fresh("exactly 15 s", 16000000LL, 1000000LL, 1);
     expect_fresh("15 s + 1 us", 16000001LL, 1000000LL, 0);
     expect_fresh("clock went back", 999999LL, 1000000LL, 1);
+
+    // Delayed material responses are accepted only for the active status sample
+    // that triggered them; a newer poll invalidates a slow/fragmented response.
+    expect_material_result_current("same print sample", 1000000LL, 1000000LL,
+                                   true, true, 1);
+    expect_material_result_current("newer status sample", 1000000LL, 6000000LL,
+                                   true, true, 0);
+    expect_material_result_current("printer offline", 1000000LL, 1000000LL,
+                                   false, true, 0);
+    expect_material_result_current("print ended", 1000000LL, 1000000LL,
+                                   true, false, 0);
 
     // Full snapshot contract used by dc_prusa_get_status().
     expect_snapshot("fresh online", populated(DC_PRUSA_ONLINE, true),
@@ -130,9 +139,11 @@ int main(void)
                     999999LL, 1000000LL,
                     DC_PRUSA_ONLINE, 1, 1, 0);
 
-    // Material rides the status sample.
-    expect_material("fresh keeps",  2000000LL, 1000000LL, "PETG");
-    expect_material("stale clears", 16001000LL, 1000000LL, "");
+    // Material expires independently, even while the status remains fresh.
+    expect_material("fresh keeps", 2000000LL, 1900000LL, 1000000LL, "PETG");
+    expect_material("age boundary", 16000000LL, 15900000LL, 1000000LL, "PETG");
+    expect_material("worker stalled", 16001000LL, 15900000LL, 1000000LL, "");
+    expect_material("no material sample", 2000000LL, 1900000LL, 0, "");
 
     // Per-tool filament pick for /api/v1/job "filament_type per tool".
     expect_pick("no slots",         0,  NULL, false, -1);
