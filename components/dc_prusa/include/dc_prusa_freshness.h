@@ -64,6 +64,7 @@ static inline void dc_prusa_status_apply_freshness(dc_prusa_status_t *status,
 
 // Material is polled by an independent worker. Expire the last filament if that
 // worker stalls, even while the status task continues to report a fresh printer.
+// Clearing it makes AUTO fail idle instead of acting on an old filament profile.
 static inline void dc_prusa_material_apply_freshness(dc_prusa_status_t *status,
                                                     int64_t now_us,
                                                     int64_t material_us)

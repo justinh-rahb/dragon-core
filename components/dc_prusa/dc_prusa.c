@@ -25,7 +25,9 @@ static const char *TAG = "dc_prusa";
 
 #define POLL_PERIOD_MS   5000         // socket-starved nhttp: 5 s comfortable
 #define HTTP_TIMEOUT_MS  4000         // /api/v1/status (the freshness-critical poll)
-#define MATERIAL_TIMEOUT_MS 2000      // per network operation; material uses its own task
+// ESP-IDF applies this timeout to each network operation/read, not to the whole
+// response. A fragmented /job response can therefore run longer than this.
+#define MATERIAL_TIMEOUT_MS 2000
 #define RESP_MAX         1536         // /api/v1/status is ~300-400 B; generous
 #define JOB_RESP_MAX     4096         // /api/v1/job carries file.meta (larger)
 // Material token cap + per-tool max live in dc_prusa_parse.h (DC_PRUSA_MAT_MAX /
@@ -315,8 +317,8 @@ static void poll_once(esp_http_client_handle_t client, char *url, size_t url_sz)
     // answers 200 with non-JSON must never look like a connected printer.
     if (total <= 0 || !parse_status(s_resp)) { set_state(DC_PRUSA_OFFLINE); return; }
     set_state(DC_PRUSA_ONLINE);
-    // Material requests run independently, so a slow/fragmented response cannot
-    // hold up this status poll or make a healthy printer go stale.
+    // Keep /job I/O out of this task: ESP-IDF's timeout is per network operation,
+    // so a fragmented response can outlast the timeout and stall status polling.
     if (s_material_task) xTaskNotifyGive(s_material_task);
 }
 
@@ -386,6 +388,8 @@ esp_err_t dc_prusa_start(void)
         .timeout_ms = MATERIAL_TIMEOUT_MS,
         .keep_alive_enable = false,
     };
+    // Each task owns its client. Sharing one client would serialize /job reads
+    // with the freshness-critical /status poll even though they use separate URLs.
     s_status_client = esp_http_client_init(&status_hc);
     if (!s_status_client) return ESP_ERR_NO_MEM;
     s_material_client = esp_http_client_init(&material_hc);
