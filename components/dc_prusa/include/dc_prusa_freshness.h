@@ -10,6 +10,18 @@
 // sample_us <= 0 means no complete status has ever been received. A backwards
 // monotonic-clock delta is treated as age zero rather than spuriously stale.
 #define DC_PRUSA_STATUS_STALE_US 15000000LL
+#define DC_PRUSA_MATERIAL_STALE_US 15000000LL
+
+// Accept an asynchronous material response only for the status snapshot that
+// triggered it, while that snapshot still describes an active online print.
+static inline bool dc_prusa_material_result_current(int64_t response_status_us,
+                                                    int64_t current_status_us,
+                                                    bool online,
+                                                    bool printing)
+{
+    return response_status_us > 0 && response_status_us == current_status_us &&
+           online && printing;
+}
 
 static inline bool dc_prusa_status_sample_fresh(int64_t now_us, int64_t sample_us)
 {
@@ -46,5 +58,19 @@ static inline void dc_prusa_status_apply_freshness(dc_prusa_status_t *status,
         status->bed_temp = NAN;
         status->bed_target = 0.0f;
         status->printer_state[0] = '\0';
+        status->material[0] = '\0';
     }
+}
+
+// Material is polled by an independent worker. Expire the last filament if that
+// worker stalls, even while the status task continues to report a fresh printer.
+// Clearing it makes AUTO fail idle instead of acting on an old filament profile.
+static inline void dc_prusa_material_apply_freshness(dc_prusa_status_t *status,
+                                                    int64_t now_us,
+                                                    int64_t material_us)
+{
+    if (!status || !status->material[0]) return;
+    int64_t age_us = material_us > 0 ? now_us - material_us : INT64_MAX;
+    if (age_us < 0) age_us = 0;
+    if (age_us > DC_PRUSA_MATERIAL_STALE_US) status->material[0] = '\0';
 }
