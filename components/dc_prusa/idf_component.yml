@@ -1,5 +1,5 @@
-version: "0.35.2"
-description: PrusaLink HTTP client and bed-follow chamber target for Dragon firmware
+version: "0.35.3"
+description: PrusaLink HTTP client and filament-aware chamber control for Dragon firmware
 license: MIT
 dependencies:
   idf: ">=5.3"
