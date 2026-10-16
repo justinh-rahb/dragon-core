@@ -50,6 +50,8 @@ static esp_netif_t *s_ap_netif = NULL;
 static esp_timer_handle_t s_ap_temp_timer = NULL;   // TEMP-mode AP shutdown
 static esp_timer_handle_t s_no_ip_timer   = NULL;   // "associated but no DHCP IP" watchdog
 #define NO_IP_TIMEOUT_US  (5ULL * 1000000ULL)       // 5s to get a DHCP lease, else drop & re-scan
+static esp_timer_handle_t s_reconnect_timer = NULL; // periodic "retry saved SSID if down"
+#define RECONNECT_PERIOD_US  (30ULL * 1000000ULL)   // retry a dropped STA every 30s, indefinitely
 static int s_retry = 0;
 // Radio tuning profile (see dc_wifi.h). Default STANDARD reproduces the pre-0.30
 // STA behavior; products with a weak antenna call dc_wifi_set_radio_profile().
@@ -428,6 +430,43 @@ static void no_ip_watch_stop(void)
     if (s_no_ip_timer) esp_timer_stop(s_no_ip_timer);
 }
 
+// Periodic, give-up-proof STA reconnect. The reactive disconnect handler retries
+// only a bounded number of times and then latches BIT_FAILED — a signal that is
+// only consumed at boot, so a drop after long idle would otherwise never recover
+// (the device stays locally usable but off-network). This timer re-attempts the
+// saved SSID forever whenever we are configured as a station and not currently
+// connected, and clears the reactive retry budget so each tick gets a fresh burst
+// of attempts.
+//
+// It retries from AP_PORTAL too: a device that boots/reboots while the WiFi is down
+// fails its boot-time STA attempt and falls to the setup portal with valid saved
+// creds, where it would otherwise stay stranded on its own AP until a manual reboot.
+// Retrying from the portal climbs it back onto the home network the moment WiFi
+// returns. This never disrupts provisioning: a user entering new creds just sees the
+// old ones fail harmlessly (we stay in the portal for them to finish), and we skip
+// any tick while a portal scan is in flight so esp_wifi_connect() can't abort it.
+static void reconnect_tick(void *arg)
+{
+    (void)arg;
+    if (s_state == DC_WIFI_STATE_STA_CONNECTED) return;   // already up
+    if (s_sta_ssid[0] == '\0') return;                    // no saved SSID to reconnect to
+    if (s_scanning) return;                               // don't abort an in-flight portal scan
+    ESP_LOGW(TAG, "periodic reconnect: re-attempting saved SSID '%s'%s", s_sta_ssid,
+             s_state == DC_WIFI_STATE_AP_PORTAL ? " (from setup portal)" : "");
+    s_retry = 0;
+    esp_wifi_connect();
+}
+
+static void reconnect_watch_start(void)
+{
+    if (s_reconnect_timer == NULL) {
+        const esp_timer_create_args_t args = { .callback = reconnect_tick, .name = "wifi_reconn" };
+        if (esp_timer_create(&args, &s_reconnect_timer) != ESP_OK) return;
+    }
+    esp_timer_stop(s_reconnect_timer);
+    esp_timer_start_periodic(s_reconnect_timer, RECONNECT_PERIOD_US);
+}
+
 // ---------- STA mode ----------
 
 static void start_sta_mode(const char *ssid, const char *pass)
@@ -524,7 +563,12 @@ static void on_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *da
                 ESP_LOGW(TAG, "STA disconnect; retry %d/%d", s_retry, sta_max_retries());
                 esp_wifi_connect();
             } else {
-                ESP_LOGW(TAG, "STA gave up; falling back to portal");
+                // Reactive retry budget exhausted. At boot, BIT_FAILED drives the
+                // portal fallback (bad/missing creds). Mid-session that bit is a
+                // dead signal, so mark us no-longer-connected and let the periodic
+                // reconnect timer keep re-attempting the saved SSID forever.
+                ESP_LOGW(TAG, "STA retry budget exhausted; periodic reconnect will keep trying");
+                s_state = DC_WIFI_STATE_STA_CONNECTING;
                 xEventGroupSetBits(s_events, BIT_FAILED);
             }
         }
@@ -720,6 +764,10 @@ esp_err_t dc_wifi_start(void)
         ESP_LOGI(TAG, "no saved WiFi credentials");
         start_ap_mode();
     }
+    // Arm the give-up-proof reconnect now that the boot decision is made. It no-ops
+    // while connected or in the setup portal, and keeps re-attempting the saved SSID
+    // after any later drop (the reactive retry path alone latches and never recovers).
+    reconnect_watch_start();
     return ESP_OK;
 }
 
