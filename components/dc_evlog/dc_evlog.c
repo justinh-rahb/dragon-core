@@ -29,6 +29,16 @@ static uint64_t         s_con_write_seq = 0; // total bytes appended; guarded by
 static vprintf_like_t   s_prev_vprintf = NULL;
 static bool             s_con_on = false;
 
+// Marker appended in place of the tail of a line vsnprintf had to truncate,
+// so the captured ring never loses its line terminator (which would glue the
+// next captured line onto this one) and a reader can see truncation happened.
+// Always ends in '\n'; kept well under CON_LINE so it always fits alongside
+// at least some of the real content.
+static const char TRUNCATION_MARKER[] = "...[truncated]\n";
+#define TRUNCATION_MARKER_LEN (sizeof(TRUNCATION_MARKER) - 1)
+_Static_assert(TRUNCATION_MARKER_LEN < CON_LINE - 1,
+               "truncation marker must fit within CON_LINE alongside content");
+
 static void con_append(const char *p, int n)
 {
     if (n <= 0) return;
@@ -43,13 +53,29 @@ static void con_append(const char *p, int n)
 
 // esp_log hook: tee the formatted line into the ring, then forward to the original
 // writer (UART) via a va_copy so the serial console is unchanged.
+//
+// vsnprintf's return value is the length the formatted line WOULD occupy,
+// regardless of buffer size, so a return >= sizeof(line) means the line was
+// too long for the capture buffer (the untouched fmt/ap2 pair still reaches
+// the real writer below with the full line, so UART is never affected).
+// A previous version captured the raw truncated bytes as-is: since vsnprintf
+// truncates by dropping the tail, whatever newline the original line ended
+// with was also dropped, so the next captured line ran on directly after the
+// truncated one with no separator. Reserve room for a marker that always
+// re-terminates the captured entry so ring framing can never be lost this
+// way; the discarded tail (beyond CON_LINE) was never captured either way.
 static int con_vprintf(const char *fmt, va_list ap)
 {
     char line[CON_LINE];
     va_list ap2;
     va_copy(ap2, ap);
     int n = vsnprintf(line, sizeof line, fmt, ap);
-    con_append(line, n < (int)sizeof line ? n : (int)sizeof line - 1);
+    if (n < (int)sizeof line) {
+        con_append(line, n);
+    } else {
+        con_append(line, (int)sizeof line - 1 - (int)TRUNCATION_MARKER_LEN);
+        con_append(TRUNCATION_MARKER, (int)TRUNCATION_MARKER_LEN);
+    }
     int r = s_prev_vprintf ? s_prev_vprintf(fmt, ap2) : 0;
     va_end(ap2);
     return r;
