@@ -1026,6 +1026,20 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
           <div class="mode-feedback" id="c-cal-msg" role="status" aria-live="polite"></div>
         </div>
 
+        <!-- Optional DragonBreath setting; shown only when its /settings API
+             advertises the persisted thermistor mapping fields. -->
+        <div class="set-card" id="s-thermistor-card" hidden>
+          <h3>Thermistor mapping</h3>
+          <div class="set-head-row">
+            <span class="set-note" style="margin:0">Swap thermistors</span>
+            <button class="btn" type="button" id="s-swap-thermistors" aria-pressed="false"><span>Off</span></button>
+          </div>
+          <p class="set-note">Enable only if the chamber and heater-element thermistor connectors are crossed. This swaps both displayed readings and their safety roles. Two-wire thermistors are nonpolar, so flipping one sensor’s wires does not need this setting. Save the choice, then reboot to apply it.</p>
+          <p class="set-note" id="s-swap-active">Currently active: normal mapping.</p>
+          <button class="btn btn-primary btn-block" type="button" id="s-swap-save"><svg class="icon"><use href="#i-thermometer"/></svg> <span>Save thermistor mapping</span></button>
+          <div class="mode-feedback" id="s-swap-msg" role="status" aria-live="polite"></div>
+        </div>
+
         <!-- Status LEDs master enable (POST /settings?leds_enabled=). -->
         <div class="set-card">
           <h3>Status LEDs</h3>
@@ -2755,6 +2769,10 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
       if(isFinite(s.filter_temp)) setSset('filt', s.filter_temp);
       if(typeof s.filter_auto==='boolean') setFiltEn(s.filter_auto);
       if(typeof s.leds_enabled==='boolean') setLedToggle(s.leds_enabled);
+      var swapCard=$('s-thermistor-card');
+      if(swapCard) swapCard.hidden=typeof s.swap_thermistors!=='boolean';
+      if(typeof s.swap_thermistors==='boolean') setThermistorSwap(s.swap_thermistors);
+      if(typeof s.swap_thermistors_active==='boolean') showThermistorSwapState(s.swap_thermistors_active, s.swap_thermistors);
     }).catch(function(){});
   }
   document.querySelectorAll('[data-sstep]').forEach(function(b){
@@ -2904,6 +2922,37 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
       .then(function(s){ setLedToggle(s && typeof s.leds_enabled==='boolean' ? s.leds_enabled : next);
         flash('s-leds-msg', next?'LEDs on.':'LEDs off.', 'is-ok'); })
       .catch(function(j){ flash('s-leds-msg', 'Failed: '+((j&&(j.message||j.error))||'error'), 'is-error'); });
+  });
+
+  /* Swap the logical chamber/PTC roles for boards with crossed sensor inputs.
+     Firmware stages the choice in NVS and activates it only after reboot. */
+  function setThermistorSwap(on){
+    var b=$('s-swap-thermistors'); if(!b) return;
+    b.setAttribute('aria-pressed', on?'true':'false');
+    b.querySelector('span').textContent=on?'On':'Off';
+  }
+  function showThermistorSwapState(active, configured){
+    var e=$('s-swap-active'); if(!e) return;
+    var activeName=active?'swapped':'normal';
+    e.textContent=active===configured
+      ? 'Currently active: '+activeName+' mapping.'
+      : 'Currently active: '+activeName+' mapping. Reboot required to apply the saved choice.';
+  }
+  if($('s-swap-thermistors')) $('s-swap-thermistors').addEventListener('click',function(){
+    setThermistorSwap($('s-swap-thermistors').getAttribute('aria-pressed')!=='true');
+  });
+  if($('s-swap-save')) $('s-swap-save').addEventListener('click',function(){
+    var selected=$('s-swap-thermistors').getAttribute('aria-pressed')==='true';
+    flash('s-swap-msg','Saving…');
+    request('/settings?swap_thermistors='+(selected?1:0),{})
+      .then(function(s){
+        var configured=s&&typeof s.swap_thermistors==='boolean'?s.swap_thermistors:selected;
+        var active=s&&typeof s.swap_thermistors_active==='boolean'?s.swap_thermistors_active:!configured;
+        setThermistorSwap(configured);
+        showThermistorSwapState(active,configured);
+        flash('s-swap-msg',active===configured?'Saved; this mapping is already active.':'Saved. Reboot the device to apply it.','is-ok');
+      })
+      .catch(function(j){flash('s-swap-msg','Save failed: '+((j&&(j.message||j.error))||'error'),'is-error');});
   });
 
   /* Control token set/clear -> POST /api/v2/token. On success this browser keeps
