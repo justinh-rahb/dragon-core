@@ -1034,7 +1034,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
             <span class="set-note" style="margin:0">Swap thermistors</span>
             <button class="btn" type="button" id="s-swap-thermistors" aria-pressed="false"><span>Off</span></button>
           </div>
-          <p class="set-note">Enable only if the chamber and heater-element thermistor connectors are crossed. This swaps both displayed readings and their safety roles. Two-wire thermistors are nonpolar, so flipping one sensor’s wires does not need this setting. Save the choice, then reboot to apply it.</p>
+          <p class="set-note">Enable only when the two board JST sockets have the chamber and heater-element thermistor connectors plugged into the opposite sockets. This swaps both ADC inputs, displayed readings, and their safety roles. Save the choice, then reboot to apply it.</p>
           <p class="set-note" id="s-swap-active">Currently active: normal mapping.</p>
           <button class="btn btn-primary btn-block" type="button" id="s-swap-save"><svg class="icon"><use href="#i-thermometer"/></svg> <span>Save thermistor mapping</span></button>
           <div class="mode-feedback" id="s-swap-msg" role="status" aria-live="polite"></div>
