@@ -77,6 +77,24 @@ static inline const char *dc_bambu_json_object_end(const char *object)
     return NULL;
 }
 
+static inline const char *dc_bambu_json_array_end(const char *array)
+{
+    if (!array || *array != '[') return NULL;
+    int depth = 0;
+    for (const char *p = array; *p; p++) {
+        if (*p == '"') {
+            p = dc_bambu_json_string_end(p);
+            if (!p) return NULL;
+        } else if (*p == '{' || *p == '[') {
+            depth++;
+        } else if (*p == '}' || *p == ']') {
+            if (--depth == 0) return p;
+            if (depth < 0) return NULL;
+        }
+    }
+    return NULL;
+}
+
 static inline const char *dc_bambu_json_direct_member(const char *object,
                                                        const char *key)
 {
@@ -162,6 +180,62 @@ static inline bool dc_bambu_find_string(const char *s, const char *key, char *ou
     return true;
 }
 
+// Find a named object without requiring the enclosing Bambu push-status message
+// to be complete. X1 reports can exceed the controller's reassembly buffer, but
+// the AMS object is near the front and is normally received in full.
+static inline const char *dc_bambu_json_find_object(const char *json, const char *quoted_key)
+{
+    const char *key = strstr(json, quoted_key);
+    if (!key) return NULL;
+    const char *value = strchr(key + strlen(quoted_key), ':');
+    if (!value) return NULL;
+    do { value++; } while (*value == ' ' || *value == '\t' ||
+                           *value == '\n' || *value == '\r');
+    return *value == '{' ? value : NULL;
+}
+
+static inline bool dc_bambu_json_member_string(const char *object, const char *key,
+                                                char *out, size_t outsz)
+{
+    const char *value = dc_bambu_json_direct_member(object, key);
+    if (!value || *value != '"' || outsz == 0) return false;
+    value++;
+    size_t i = 0;
+    while (*value && *value != '"' && i + 1 < outsz) out[i++] = *value++;
+    out[i] = '\0';
+    return *value == '"';
+}
+
+static inline bool dc_bambu_json_member_long(const char *object, const char *key,
+                                              long *out)
+{
+    const char *value = dc_bambu_json_direct_member(object, key);
+    if (!value) return false;
+    bool quoted = *value == '"';
+    if (quoted) value++;
+    char *end = NULL;
+    long parsed = strtol(value, &end, 10);
+    if (end == value || (quoted && *end != '"')) return false;
+    if (out) *out = parsed;
+    return true;
+}
+
+static inline const char *dc_bambu_json_next_array_object(const char *cursor,
+                                                           const char *array)
+{
+    const char *limit = dc_bambu_json_array_end(array);
+    if (!limit) return NULL;
+    for (const char *p = cursor ? cursor : array + 1; p < limit; p++) {
+        if (*p == '"') {
+            p = dc_bambu_json_string_end(p);
+            if (!p) return NULL;
+        } else if (*p == '{') {
+            return p;
+        }
+    }
+    return NULL;
+}
+
 // Resolve the ACTIVE filament type from a Bambu report. Bambu lists loaded filaments
 // under print.ams (AMS units, tray[].tray_type) and print.vt_tray (external spool),
 // with print.ams.tray_now selecting the active global tray index (254 = external
@@ -169,15 +243,14 @@ static inline bool dc_bambu_find_string(const char *s, const char *key, char *ou
 static inline dc_fila_result_t dc_bambu_active_filament(const char *json, char *out, size_t outsz)
 {
     out[0] = '\0';
-    const char *tn  = strstr(json, "\"tray_now\"");
-    const char *vt  = strstr(json, "\"vt_tray\"");
-    const char *ams = strstr(json, "\"ams\"");
-    if (!tn && !vt && !ams) return DC_FILA_ABSENT;   // delta with no filament state
+    const char *ams = dc_bambu_json_find_object(json, "\"ams\"");
+    const char *vt = dc_bambu_json_find_object(json, "\"vt_tray\"");
+    if ((!ams || *ams != '{') && (!vt || *vt != '{')) return DC_FILA_ABSENT;
 
-    char trayn[8] = {0};
-    long now = (tn && dc_bambu_find_string(json, "\"tray_now\"", trayn, sizeof trayn))
-                   ? strtol(trayn, NULL, 10) : -1;
-    char tt[16];
+    long now = -1;
+    bool got_now = ams && *ams == '{' &&
+                   dc_bambu_json_member_long(ams, "tray_now", &now);
+    char tt[16] = {0};
 
     if (now == 255) return DC_FILA_EMPTY;   // tray_now explicitly says nothing is loaded
 
@@ -185,25 +258,42 @@ static inline dc_fila_result_t dc_bambu_active_filament(const char *json, char *
     // A delta may name the slot (tray_now) without including the tray payload — that is
     // ABSENT (keep the last known filament), not empty. Only an active tray whose
     // tray_type is explicitly present-and-empty counts as EMPTY.
-    if (now >= 0 && now < 250) {
-        if (ams) {
-            const char *p = ams; long idx = -1;
-            while ((p = strstr(p, "\"tray_type\"")) != NULL) {
-                if (++idx == now) {                 // the active tray IS in this report
-                    if (dc_bambu_find_string(p, "\"tray_type\"", tt, sizeof tt)) {
-                        if (tt[0]) { snprintf(out, outsz, "%s", tt); return DC_FILA_PRESENT; }
-                        return DC_FILA_EMPTY;        // active tray present but empty
-                    }
-                    break;
+    if (got_now && now >= 0 && now < 250) {
+        // Four-slot AMS families flatten unit/slot as unit * 4 + slot. AMS HT
+        // units instead use hardware IDs 128..152 and contain one slot (0), so
+        // tray_now is the unit ID itself.
+        const bool is_ams_ht = now >= 128 && now < 153;
+        const long wanted_ams = is_ams_ht ? now : now / 4;
+        const long wanted_tray = is_ams_ht ? 0 : now % 4;
+        const char *units = dc_bambu_json_direct_member(ams, "ams");
+        if (units && *units == '[') {
+            const char *unit = NULL;
+            while ((unit = dc_bambu_json_next_array_object(
+                        unit ? dc_bambu_json_object_end(unit) + 1 : NULL, units))) {
+                long unit_id = -1;
+                if (!dc_bambu_json_member_long(unit, "id", &unit_id) ||
+                    unit_id != wanted_ams) continue;
+                const char *trays = dc_bambu_json_direct_member(unit, "tray");
+                if (!trays || *trays != '[') break;
+                const char *tray = NULL;
+                while ((tray = dc_bambu_json_next_array_object(
+                            tray ? dc_bambu_json_object_end(tray) + 1 : NULL, trays))) {
+                    long tray_id = -1;
+                    if (!dc_bambu_json_member_long(tray, "id", &tray_id) ||
+                        tray_id != wanted_tray) continue;
+                    if (!dc_bambu_json_member_string(tray, "tray_type", tt, sizeof tt))
+                        return DC_FILA_EMPTY;
+                    if (tt[0]) { snprintf(out, outsz, "%s", tt); return DC_FILA_PRESENT; }
+                    return DC_FILA_EMPTY;
                 }
-                p += 11;
+                break;
             }
         }
         return DC_FILA_ABSENT;   // selected tray's payload not in this (delta) report
     }
 
     // External spool (tray_now 254, or tray_now absent with a vt_tray present).
-    if (vt && dc_bambu_find_string(vt, "\"tray_type\"", tt, sizeof tt)) {
+    if (vt && *vt == '{' && dc_bambu_json_member_string(vt, "tray_type", tt, sizeof tt)) {
         if (tt[0]) { snprintf(out, outsz, "%s", tt); return DC_FILA_PRESENT; }
         return DC_FILA_EMPTY;    // external spool present but empty
     }
