@@ -438,21 +438,20 @@ static void no_ip_watch_stop(void)
 // connected, and clears the reactive retry budget so each tick gets a fresh burst
 // of attempts.
 //
-// It retries from AP_PORTAL too: a device that boots/reboots while the WiFi is down
-// fails its boot-time STA attempt and falls to the setup portal with valid saved
-// creds, where it would otherwise stay stranded on its own AP until a manual reboot.
-// Retrying from the portal climbs it back onto the home network the moment WiFi
-// returns. This never disrupts provisioning: a user entering new creds just sees the
-// old ones fail harmlessly (we stay in the portal for them to finish), and we skip
-// any tick while a portal scan is in flight so esp_wifi_connect() can't abort it.
+// Do not retry from AP_PORTAL. dc_portal snapshots that mode at startup to decide
+// whether setup endpoints are exempt from auth and whether captive DNS should run.
+// Connecting in the background would leave those setup endpoints unauthenticated on
+// the home LAN. It could also race a user-initiated portal scan because ESP-IDF does
+// not allow scans and STA connects at the same time. Boot-time failures therefore
+// stay in the recovery portal; this timer handles drops after a successful boot.
 static void reconnect_tick(void *arg)
 {
     (void)arg;
     if (s_state == DC_WIFI_STATE_STA_CONNECTED) return;   // already up
+    if (s_state == DC_WIFI_STATE_AP_PORTAL) return;       // keep setup portal isolated
     if (s_sta_ssid[0] == '\0') return;                    // no saved SSID to reconnect to
-    if (s_scanning) return;                               // don't abort an in-flight portal scan
-    ESP_LOGW(TAG, "periodic reconnect: re-attempting saved SSID '%s'%s", s_sta_ssid,
-             s_state == DC_WIFI_STATE_AP_PORTAL ? " (from setup portal)" : "");
+    if (dc_wifi_is_scanning()) return;                    // don't abort an in-flight scan
+    ESP_LOGW(TAG, "periodic reconnect: re-attempting saved SSID '%s'", s_sta_ssid);
     s_retry = 0;
     esp_wifi_connect();
 }
@@ -766,7 +765,7 @@ esp_err_t dc_wifi_start(void)
     }
     // Arm the give-up-proof reconnect now that the boot decision is made. It no-ops
     // while connected or in the setup portal, and keeps re-attempting the saved SSID
-    // after any later drop (the reactive retry path alone latches and never recovers).
+    // after a post-boot drop (the reactive retry path alone latches and never recovers).
     reconnect_watch_start();
     return ESP_OK;
 }
