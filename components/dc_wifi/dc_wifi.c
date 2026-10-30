@@ -451,6 +451,9 @@ static void reconnect_tick(void *arg)
     if (s_state == DC_WIFI_STATE_AP_PORTAL) return;       // keep setup portal isolated
     if (s_sta_ssid[0] == '\0') return;                    // no saved SSID to reconnect to
     if (dc_wifi_is_scanning()) return;                    // don't abort an in-flight scan
+    // Let the current reactive burst finish. CONSTRAINED allows 20 attempts, which
+    // can outlast this timer period; resetting s_retry mid-burst would restart it.
+    if (s_retry > 0 && s_retry < sta_max_retries()) return;
     ESP_LOGW(TAG, "periodic reconnect: re-attempting saved SSID '%s'", s_sta_ssid);
     s_retry = 0;
     esp_wifi_connect();
