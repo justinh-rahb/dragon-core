@@ -282,7 +282,7 @@ static inline dc_fila_result_t dc_bambu_active_filament(const char *json, char *
                     if (!dc_bambu_json_member_long(tray, "id", &tray_id) ||
                         tray_id != wanted_tray) continue;
                     if (!dc_bambu_json_member_string(tray, "tray_type", tt, sizeof tt))
-                        return DC_FILA_EMPTY;
+                        return DC_FILA_ABSENT;  // missing type may be an incomplete delta
                     if (tt[0]) { snprintf(out, outsz, "%s", tt); return DC_FILA_PRESENT; }
                     return DC_FILA_EMPTY;
                 }
