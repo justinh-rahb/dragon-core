@@ -2599,7 +2599,11 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
   // Manual Start and Stop are distinct controls with stable commands. A device
   // state update can disable Start but can never turn a Stop tap into Start.
   function manualStartAllowed(s){
-    return !!(s && s.mode==='off' && s.safety && !s.safety.inhibited && !s.safety.fault_latched);
+    // Manual heating may override AUTO or DRYING; product policy decides how
+    // each transition and subsequent recovery are handled. Never start while
+    // already in a manual run, without valid state, or with safety inhibited.
+    return !!(s && (s.mode==='off' || s.mode==='auto' || s.mode==='drying')
+      && s.safety && !s.safety.inhibited && !s.safety.fault_latched);
   }
   function renderManual(s){
     var run = s.mode==='power_on';
