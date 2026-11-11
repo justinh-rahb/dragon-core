@@ -11,75 +11,125 @@ function section(start, end) {
   return html.slice(a, b);
 }
 
-// Execute the real helper, renderer and event handlers in a tiny DOM/command
-// harness. No browser, network, product firmware or heater is involved.
-const code = section("  function manualActionForState(s){", "  function renderAuto(s){")
-  + "\n" + section("  var manualIntent = null;", "  $('a-action').addEventListener('click'");
-const listeners = {};
+// Run the actual shared UI renderer and click handlers against mock DOM and
+// commands, without networking or a heater. The extraction deliberately checks
+// known section boundaries so changes to the surrounding SPA are noticed.
+const code = section("  function manualStartAllowed(s){", "  function renderAuto(s){")
+  + "\n" + section("  $('m-stop').addEventListener('click'", "  $('a-action').addEventListener('click'");
 const sent = [];
-const action = { label: "", icon: "", danger: false };
+const buttons = {
+  "m-start": { disabled: true, listeners: {} },
+  "m-stop": { disabled: false, listeners: {} },
+};
 const statuses = [];
 const context = {
   last: null, lease: null, fields: { man: { val: 50 } }, touched: { man: 1 },
   $: (id) => {
-    assert.equal(id, "m-action");
-    return { addEventListener: (name, fn) => { listeners[name] = fn; } };
+    assert.ok(buttons[id], `unexpected button ${id}`);
+    return {
+      get disabled() { return buttons[id].disabled; },
+      set disabled(value) { buttons[id].disabled = value; },
+      addEventListener: (name, fn) => { buttons[id].listeners[name] = fn; },
+    };
   },
-  setAction: (id, label, icon, danger) => { assert.equal(id, "m-action"); Object.assign(action, { label, icon, danger }); },
-  setStatus: (id, text) => { assert.equal(id, "m-status"); statuses.push(text); },
+  setStatus: (id, message) => { assert.equal(id, "m-status"); statuses.push(message); },
   command: (name, args) => { sent.push({ name, args }); return Promise.resolve({ lease_id: "test" }); },
   runCmd: (_id, promise) => promise,
 };
 vm.runInNewContext(code, context, { filename: "dc_ui-manual-handler.js" });
 
+// The two controls must never exchange IDs or labels during an SSE render.
+assert.match(html, /id="m-start"[^>]*>[^]*?<span>Start heating<\/span>/);
+assert.match(html, /id="m-stop"[^>]*>[^]*?<span>Stop<\/span>/);
+assert.ok(!html.includes('id="m-action"'), "old toggle must be removed");
+assert.ok(!html.includes("manualIntent"), "gesture intent bookkeeping must be removed");
+
 const ready = () => ({ mode: "off", target: { effective_c: 0 }, safety: { inhibited: false, fault_latched: false } });
 const heating = () => ({ mode: "power_on", target: { effective_c: 50 }, safety: { inhibited: false, fault_latched: false } });
 const fault = () => ({ mode: "off", target: { effective_c: 0 }, safety: { inhibited: false, fault_latched: true } });
 const inhibited = () => ({ mode: "off", target: { effective_c: 0 }, safety: { inhibited: true, fault_latched: false } });
+const otherMode = (mode) => ({ mode, target: { effective_c: 50 }, safety: { inhibited: false, fault_latched: false } });
 
-async function check(label, initial, beforeClick, expected, event = "pointerdown") {
+function paint(s) {
+  context.last = s;
+  if (s) context.renderManual(s);
+}
+function click(id) {
+  // Simulate ordinary user activation (disabled controls cannot be clicked).
+  if (buttons[id].disabled) return;
+  buttons[id].listeners.click();
+}
+function assertCommands(names, label) {
+  assert.deepEqual(sent.map((x) => x.name), names, label);
   sent.length = 0;
-  context.last = initial;
-  if (event) listeners[event](event === "keydown" ? { key: "Enter" } : {});
-  if (beforeClick) context.last = beforeClick;
-  listeners.click();
-  await Promise.resolve();
-  assert.deepEqual(sent.map((x) => x.name), expected, label);
 }
 
-// Normal operations.
-await check("start while ready", ready(), null, ["power_on"]);
-await check("stop while heating", heating(), null, ["off"]);
-// Faults and asynchronous state changes must never convert Stop into Start.
-await check("fault arrives during Stop gesture", heating(), fault(), ["off"]);
-await check("mode turns off during Stop gesture", heating(), ready(), ["off"]);
-await check("fault arrives during Start gesture", ready(), fault(), ["off"]);
-await check("faulted state without pointer event", fault(), null, ["off"], null);
-await check("inhibited state without pointer event", inhibited(), null, ["off"], null);
-await check("keyboard Stop survives mode update", heating(), ready(), ["off"], "keydown");
-// No state must never submit a start request.
-await check("no device snapshot", null, null, [], null);
+// Normal manual start is available only in ready OFF state.
+paint(ready());
+assert.equal(buttons["m-start"].disabled, false);
+click("m-start");
+assertCommands(["power_on"], "start when ready");
 
-// An abandoned pointer gesture should not force a future interaction to Stop.
-sent.length = 0;
-context.last = heating();
-listeners.pointerdown();
-listeners.pointercancel();
-context.last = ready();
-listeners.click();
-assert.deepEqual(sent.map((x) => x.name), ["power_on"]);
+paint(heating());
+assert.equal(buttons["m-start"].disabled, true);
+click("m-start");
+assertCommands([], "start while already running");
+click("m-stop");
+assertCommands(["off"], "stop while running");
 
-// Fault presentation stays visibly safe rather than silently relabeling as Start.
-context.last = fault();
-context.renderManual(context.last);
-assert.equal(action.label, "Ensure heater off");
-assert.match(statuses.at(-1), /Heater off.*fault latched/);
-context.last = inhibited();
-context.renderManual(context.last);
-assert.equal(action.label, "Ensure heater off");
+// Critical pre-press race: another actor stops the run before the user touches
+// the old Stop location. Stop remains Stop; it can never energize the heater.
+paint(heating());
+paint(ready());
+click("m-stop");
+assertCommands(["off"], "stop after another actor turns heater off");
+
+// A fault or inhibit before the press leaves Stop available, disables Start,
+// and never sends power_on.
+for (const [label, state] of [["fault", fault()], ["inhibit", inhibited()]]) {
+  paint(state);
+  assert.equal(buttons["m-start"].disabled, true, label);
+  assert.equal(buttons["m-stop"].disabled, false, label);
+  click("m-start");
+  click("m-stop");
+  assertCommands(["off"], label);
+}
+assert.match(statuses.at(-2), /Heater off.*fault latched/);
 assert.match(statuses.at(-1), /Heating unavailable/);
-context.last = ready();
-context.renderManual(context.last);
-assert.equal(action.label, "Start heating");
 
-console.log("dc_ui manual Stop/fault interaction: PASS");
+// State changes between a rendered Start and click are checked again in the
+// click handler, even if an asynchronously delivered snapshot has not rendered.
+paint(ready());
+context.last = fault();
+click("m-start");
+assertCommands([], "start blocked by newer fault snapshot");
+paint(ready());
+context.last = heating();
+click("m-start");
+assertCommands([], "start blocked by newer heating snapshot");
+
+// Other active modes must not be silently overridden by a manual Start.
+for (const mode of ["auto", "drying"]) {
+  paint(otherMode(mode));
+  assert.equal(buttons["m-start"].disabled, true, mode);
+  click("m-start");
+  click("m-stop");
+  assertCommands(["off"], mode);
+}
+
+// No device state cannot authorize a manual Start. Explicit Stop remains a
+// harmless idempotent OFF request as far as the browser is concerned.
+paint(ready());
+context.last = null;
+click("m-start");
+click("m-stop");
+assertCommands(["off"], "missing snapshot");
+
+// Stable Stop works for keyboard and pointer-generated click events alike;
+// there is no intent state to leak from abandoned gestures.
+paint(ready());
+click("m-stop");
+click("m-stop");
+assertCommands(["off", "off"], "repeated Stop");
+
+console.log("dc_ui separate manual Start/Stop regression: PASS");
