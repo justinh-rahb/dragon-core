@@ -108,14 +108,35 @@ context.last = heating();
 click("m-start");
 assertCommands([], "start blocked by newer heating snapshot");
 
-// Other active modes must not be silently overridden by a manual Start.
+// Product policy permits a manual run to override AUTO or DRYING. AUTO
+// retains its product-local resume policy; the shared UI must not block either.
 for (const mode of ["auto", "drying"]) {
   paint(otherMode(mode));
-  assert.equal(buttons["m-start"].disabled, true, mode);
+  assert.equal(buttons["m-start"].disabled, false, mode);
   click("m-start");
+  assertCommands(["power_on"], mode + " permits manual override");
   click("m-stop");
-  assertCommands(["off"], mode);
+  assertCommands(["off"], mode + " Stop remains OFF");
 }
+
+// Even when Start is enabled for AUTO/DRYING, a fresh safety fault or an
+// intervening manual run must prevent an energizing request at click time.
+for (const mode of ["auto", "drying"]) {
+  paint(otherMode(mode));
+  context.last = fault();
+  click("m-start");
+  assertCommands([], mode + " fault arrives before Start");
+  paint(otherMode(mode));
+  context.last = heating();
+  click("m-start");
+  assertCommands([], mode + " manual run arrives before Start");
+}
+
+// Unknown modes are not silently treated as permission to start heating.
+paint(otherMode("unknown"));
+assert.equal(buttons["m-start"].disabled, true);
+click("m-start");
+assertCommands([], "unknown mode blocks manual Start");
 
 // No device state cannot authorize a manual Start. Explicit Stop remains a
 // harmless idempotent OFF request as far as the browser is concerned.
