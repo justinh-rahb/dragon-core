@@ -283,6 +283,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
 .mode-status.is-live{ color: var(--foreground); }
 .mode-action{ margin-top: 2px; }
 .mode-action .btn{ min-height: 46px; font-size: 15px; gap: 7px; }
+.mode-actions-manual{ display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; }
 .btn-danger{ border-color: transparent; color: var(--primary-foreground);
   background: var(--destructive); }
 .btn-danger:not(:disabled):hover{ background: color-mix(in srgb, var(--destructive) 82%, transparent); }
@@ -769,7 +770,10 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
         </div>
         <div class="mode-status" id="m-status"></div>
         <div class="mode-footer">
-          <div class="mode-action"><button class="btn btn-primary btn-block" type="button" id="m-action"><svg class="icon"><use href="#i-play"/></svg> <span>Start heating</span></button></div>
+          <div class="mode-action mode-actions-manual">
+            <button class="btn btn-primary btn-block" type="button" id="m-start" disabled><svg class="icon"><use href="#i-play"/></svg> <span>Start heating</span></button>
+            <button class="btn btn-danger btn-block" type="button" id="m-stop"><svg class="icon"><use href="#i-square"/></svg> <span>Stop</span></button>
+          </div>
           <div class="mode-feedback" id="m-msg" role="status" aria-live="polite"></div>
         </div>
       </section>
@@ -2592,19 +2596,15 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
   }
   function setStatus(id, text, mod){ var e=$(id); if(!e){return;} e.className='mode-status'+(mod?' '+mod:''); e.textContent=text; }
 
-  // A safety fault forces mode OFF, but must never turn an intended Stop into Start.
-  // "stop" always maps to the device's idempotent OFF command, even when faulted.
-  function manualActionForState(s){
-    if(!s) return 'none';
-    if(s.mode==='power_on' || (s.safety && (s.safety.inhibited || s.safety.fault_latched))) return 'stop';
-    return 'start';
+  // Manual Start and Stop are distinct controls with stable commands. A device
+  // state update can disable Start but can never turn a Stop tap into Start.
+  function manualStartAllowed(s){
+    return !!(s && s.mode==='off' && s.safety && !s.safety.inhibited && !s.safety.fault_latched);
   }
   function renderManual(s){
     var run = s.mode==='power_on';
     var blocked = !!(s.safety && (s.safety.inhibited || s.safety.fault_latched));
-    var action = manualActionForState(s);
-    setAction('m-action', run?'Stop':blocked?'Ensure heater off':'Start heating',
-              action==='stop'?'#i-square':'#i-play', action==='stop');
+    $('m-start').disabled = !manualStartAllowed(s);
     if(run) setStatus('m-status', 'Heating to '+Math.round(s.target.effective_c)+' °C.', 'is-live');
     else if(s.safety && s.safety.fault_latched) setStatus('m-status', 'Heater off — fault latched.', 'is-warn');
     else if(blocked) setStatus('m-status', 'Heating unavailable — safety chain not ready.', 'is-warn');
@@ -2708,27 +2708,17 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     b.addEventListener('click', function(){ var p=b.dataset.drypreset.split(','); setField('dryT', Number(p[0]), true); setField('dryH', Number(p[1]), true); });
   });
 
-  /* Capture the user's manual action before pointer/keyboard activation. If an
-     asynchronous state update re-renders Stop as Start during the gesture,
-     the original Stop intent wins. Current fault/active state also wins over
-     an earlier Start intent. The server remains authoritative for both. */
-  var manualIntent = null;
-  $('m-action').addEventListener('pointerdown', function(){
-    manualIntent = manualActionForState(last);
+  /* A Stop click always sends OFF, even if the device stopped or faulted before
+     the press. Start has its own button and rechecks the latest known snapshot;
+     the product's authoritative safety policy still checks the request. */
+  $('m-stop').addEventListener('click', function(){
+    lease=null;
+    runCmd('m-msg', command('off', {}));
   });
-  $('m-action').addEventListener('pointercancel', function(){ manualIntent = null; });
-  $('m-action').addEventListener('keydown', function(e){
-    if(e.key==='Enter' || e.key===' ') manualIntent = manualActionForState(last);
-  });
-  $('m-action').addEventListener('click', function(){
-    var action = manualActionForState(last);
-    var stop = manualIntent==='stop' || action==='stop';
-    manualIntent = null;
-    if(stop){ lease=null; runCmd('m-msg', command('off', {})); }
-    else if(action==='start'){
-      lease=null;
-      runCmd('m-msg', command('power_on', {target_c:fields.man.val}).then(function(r){ lease=r.lease_id||null; touched.man=0; }));
-    }
+  $('m-start').addEventListener('click', function(){
+    if(!manualStartAllowed(last)) return;
+    lease=null;
+    runCmd('m-msg', command('power_on', {target_c:fields.man.val}).then(function(r){ lease=r.lease_id||null; touched.man=0; }));
   });
   $('a-action').addEventListener('click', function(){
     if(last && last.mode==='auto'){ runCmd('a-msg', command('off', {})); }
