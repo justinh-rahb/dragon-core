@@ -2592,11 +2592,22 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
   }
   function setStatus(id, text, mod){ var e=$(id); if(!e){return;} e.className='mode-status'+(mod?' '+mod:''); e.textContent=text; }
 
+  // A safety fault forces mode OFF, but must never turn an intended Stop into Start.
+  // "stop" always maps to the device's idempotent OFF command, even when faulted.
+  function manualActionForState(s){
+    if(!s) return 'none';
+    if(s.mode==='power_on' || (s.safety && (s.safety.inhibited || s.safety.fault_latched))) return 'stop';
+    return 'start';
+  }
   function renderManual(s){
     var run = s.mode==='power_on';
-    setAction('m-action', run?'Stop':'Start heating', run?'#i-square':'#i-play', run);
+    var blocked = !!(s.safety && (s.safety.inhibited || s.safety.fault_latched));
+    var action = manualActionForState(s);
+    setAction('m-action', run?'Stop':blocked?'Ensure heater off':'Start heating',
+              action==='stop'?'#i-square':'#i-play', action==='stop');
     if(run) setStatus('m-status', 'Heating to '+Math.round(s.target.effective_c)+' °C.', 'is-live');
-    else if(s.safety.inhibited || s.safety.fault_latched) setStatus('m-status', 'Safety chain not ready.', 'is-warn');
+    else if(s.safety && s.safety.fault_latched) setStatus('m-status', 'Heater off — fault latched.', 'is-warn');
+    else if(blocked) setStatus('m-status', 'Heating unavailable — safety chain not ready.', 'is-warn');
     else setStatus('m-status', 'Heater is off.');
   }
   function renderAuto(s){
@@ -2697,10 +2708,27 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     b.addEventListener('click', function(){ var p=b.dataset.drypreset.split(','); setField('dryT', Number(p[0]), true); setField('dryH', Number(p[1]), true); });
   });
 
-  /* Primary actions -> v2 commands. Start toggles to Stop when the mode is live. */
+  /* Capture the user's manual action before pointer/keyboard activation. If an
+     asynchronous state update re-renders Stop as Start during the gesture,
+     the original Stop intent wins. Current fault/active state also wins over
+     an earlier Start intent. The server remains authoritative for both. */
+  var manualIntent = null;
+  $('m-action').addEventListener('pointerdown', function(){
+    manualIntent = manualActionForState(last);
+  });
+  $('m-action').addEventListener('pointercancel', function(){ manualIntent = null; });
+  $('m-action').addEventListener('keydown', function(e){
+    if(e.key==='Enter' || e.key===' ') manualIntent = manualActionForState(last);
+  });
   $('m-action').addEventListener('click', function(){
-    if(last && last.mode==='power_on'){ lease=null; runCmd('m-msg', command('off', {})); }
-    else { lease=null; runCmd('m-msg', command('power_on', {target_c:fields.man.val}).then(function(r){ lease=r.lease_id||null; touched.man=0; })); }
+    var action = manualActionForState(last);
+    var stop = manualIntent==='stop' || action==='stop';
+    manualIntent = null;
+    if(stop){ lease=null; runCmd('m-msg', command('off', {})); }
+    else if(action==='start'){
+      lease=null;
+      runCmd('m-msg', command('power_on', {target_c:fields.man.val}).then(function(r){ lease=r.lease_id||null; touched.man=0; }));
+    }
   });
   $('a-action').addEventListener('click', function(){
     if(last && last.mode==='auto'){ runCmd('a-msg', command('off', {})); }
