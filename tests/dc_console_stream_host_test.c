@@ -161,10 +161,132 @@ static void test_send_failure_propagates(void)
                 !marker_failure.terminated);
 }
 
+static void reset_console_ring(void)
+{
+    // Isolate each new truncation test from ring content left by earlier
+    // tests, by pushing DC_EVLOG_CONSOLE_BYTES of filler through first.
+    char filler[199];
+    memset(filler, '.', sizeof(filler) - 1);
+    filler[sizeof(filler) - 1] = '\0';
+    for (size_t i = 0; i < (DC_EVLOG_CONSOLE_BYTES / (sizeof(filler) - 1)) + 2; ++i)
+        capture_log("%s", filler);
+}
+
+// begin() copies its bounded first chunk from the OLDEST retained byte of a
+// possibly-16KB ring, so it does not by itself expose newly appended (newest)
+// bytes once the ring holds more than `max`. read() at an explicit offset
+// reaches any part of the logical view; used here right after begin() with
+// no capture_log in between, so nothing can invalidate it first.
+static size_t capture_tail(char *out, size_t max, size_t want)
+{
+    dc_evlog_console_view_t view;
+    char discard[64];
+    dc_evlog_console_snapshot_begin(&view, discard, sizeof(discard));
+    if (want > view.len) want = view.len;
+    size_t written = 0;
+    bool ok = dc_evlog_console_snapshot_read(&view, view.len - want, out, max, &written);
+    expect_true("tail read is not invalidated by a concurrent overwrite", ok);
+    return written;
+}
+
+static void test_line_within_buffer_is_captured_unchanged(void)
+{
+    reset_console_ring();
+    dc_evlog_console_view_t before;
+    char discard[64];
+    dc_evlog_console_snapshot_begin(&before, discard, sizeof(discard));
+    uint64_t seq_before = before.write_seq;
+
+    capture_log("short line\n");
+
+    dc_evlog_console_view_t view;
+    dc_evlog_console_snapshot_begin(&view, discard, sizeof(discard));
+    size_t added = (size_t)(view.write_seq - seq_before);
+
+    char tail[1024];
+    size_t n = capture_tail(tail, sizeof(tail), added);
+
+    expect_true("normal line appends exactly its own length",
+                added == strlen("short line\n"));
+    expect_true("normal line capture ends with the requested chunk",
+                n == added && memcmp(tail, "short line\n", added) == 0);
+}
+
+static void test_oversized_line_is_bounded_and_marked(void)
+{
+    reset_console_ring();
+    char oversized[400];
+    memset(oversized, 'X', sizeof(oversized) - 1);
+    oversized[sizeof(oversized) - 1] = '\0';
+
+    dc_evlog_console_view_t before_view;
+    char discard[64];
+    dc_evlog_console_snapshot_begin(&before_view, discard, sizeof(discard));
+    uint64_t seq_before = before_view.write_seq;
+
+    capture_log("%s", oversized);
+
+    dc_evlog_console_view_t view;
+    dc_evlog_console_snapshot_begin(&view, discard, sizeof(discard));
+    uint64_t added = view.write_seq - seq_before;
+
+    char captured[1024];
+    size_t n = capture_tail(captured, sizeof(captured), (size_t)added);
+    size_t marker_len = strlen("...[truncated]\n");
+
+    expect_true("truncated line stays within the CON_LINE stack buffer",
+                added < 200);
+    expect_true("truncated capture ends with a newline",
+                n > 0 && captured[n - 1] == '\n');
+    expect_true("truncated capture contains the truncation marker",
+                n >= marker_len &&
+                memcmp(captured + n - marker_len, "...[truncated]\n", marker_len) == 0);
+    expect_true("truncated capture keeps some real content before the marker",
+                n > marker_len && captured[0] == 'X');
+    expect_true("write_seq counts exactly the bytes actually appended, not the full line",
+                added == 199 && added < sizeof(oversized) - 1);
+}
+
+static void test_oversized_line_does_not_run_into_the_next_line(void)
+{
+    reset_console_ring();
+    char oversized[400];
+    memset(oversized, 'Y', sizeof(oversized) - 1);
+    oversized[sizeof(oversized) - 1] = '\0';
+
+    dc_evlog_console_view_t before_view;
+    char discard[64];
+    dc_evlog_console_snapshot_begin(&before_view, discard, sizeof(discard));
+    uint64_t seq_before = before_view.write_seq;
+
+    capture_log("%s", oversized);
+    capture_log("next line\n");
+
+    dc_evlog_console_view_t view;
+    dc_evlog_console_snapshot_begin(&view, discard, sizeof(discard));
+    uint64_t added = view.write_seq - seq_before;
+
+    char captured[1024];
+    size_t n = capture_tail(captured, sizeof(captured), (size_t)added);
+    const char *needle = "next line\n";
+    size_t needle_len = strlen(needle);
+    const char *next = NULL;
+    for (size_t i = 0; i + needle_len <= n; ++i) {
+        if (memcmp(captured + i, needle, needle_len) == 0) { next = captured + i; break; }
+    }
+
+    expect_true("the following line is present verbatim", next != NULL);
+    expect_true("the following line begins right after a newline, not glued to the truncated one",
+                next != NULL && next > captured && next[-1] == '\n');
+}
+
 int main(void)
 {
     dc_evlog_console_init();
     test_empty_console_terminates();
+    test_line_within_buffer_is_captured_unchanged();
+    test_oversized_line_is_bounded_and_marked();
+    test_oversized_line_does_not_run_into_the_next_line();
     fill_console_ring();
     test_atomic_snapshot_compatibility();
     test_snapshot_reports_invalidation();
