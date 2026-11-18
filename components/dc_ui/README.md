@@ -32,6 +32,30 @@ DragonVent selects its dedicated airflow surface with an additive descriptor:
 }
 ```
 
+
+DragonPWR selects a power-status surface without borrowing DragonBreath heater
+controls:
+
+```json
+{
+  "capabilities": ["polling"],
+  "ui": {
+    "schema": 1,
+    "product": "dragonpwr",
+    "display_name": "DragonPWR"
+  }
+}
+```
+
+Its read-only dashboard uses `/api/v2/state` with `outputs.mains`,
+`outputs.usb1`, `restore`, `heap`, `meter`, and `printer`. On the ESP32-C3
+V2 bring-up firmware, both output fields are `null` and switching capabilities
+are deliberately absent. This means **unavailable/unknown**, never measured
+OFF. The dashboard exposes only a link to the product-owned `/power` control
+page when the corresponding capability is advertised **and** the state is
+boolean. No switching command is performed by this shared view. Physical
+output qualification and power-policy interlocks remain product responsibilities.
+
 DragonStatus selects the family-owned status-light surface the same way:
 
 ```json
