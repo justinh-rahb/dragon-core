@@ -43,7 +43,6 @@ const char *dc_source_str(dc_ctl_source_t src)
 bool dc_source_has_filament(dc_ctl_source_t src)
 {
     switch (src) {
-    case DC_SRC_PRUSA: return false;   // PrusaLink reports no filament type -> bed-follow
-    default:           return true;    // Klipper/Bambu report filament -> zone profile
+    default: return true;   // Klipper/Bambu/Prusa report the loaded filament -> zone profile
     }
 }

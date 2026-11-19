@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 #include "dc_prusa.h"
 #include "dc_prusa_freshness.h"
+#include "dc_prusa_material.h"
+#include "dc_prusa_parse.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -22,11 +24,20 @@ static const char *TAG = "dc_prusa";
 #define KEY_APIKEY    "pr_key"
 
 #define POLL_PERIOD_MS   5000         // socket-starved nhttp: 5 s comfortable
-#define HTTP_TIMEOUT_MS  4000
+#define HTTP_TIMEOUT_MS  4000         // /api/v1/status (the freshness-critical poll)
+// ESP-IDF applies this timeout to each network operation/read, not to the whole
+// response. A fragmented /job response can therefore run longer than this.
+#define MATERIAL_TIMEOUT_MS 2000
 #define RESP_MAX         1536         // /api/v1/status is ~300-400 B; generous
+#define JOB_RESP_MAX     4096         // /api/v1/job carries file.meta (larger)
+// Material token cap + per-tool max live in dc_prusa_parse.h (DC_PRUSA_MAT_MAX /
+// DC_PRUSA_TOOLS_MAX) so the parsers and their host test share one definition.
 
 static SemaphoreHandle_t s_lock = NULL;
 static TaskHandle_t      s_task = NULL;
+static TaskHandle_t      s_material_task = NULL;
+static esp_http_client_handle_t s_status_client = NULL;
+static esp_http_client_handle_t s_material_client = NULL;
 static dc_prusa_config_t s_cfg = {0};
 static dc_prusa_status_t s_status = {
     .state = DC_PRUSA_DISABLED,
@@ -34,9 +45,11 @@ static dc_prusa_status_t s_status = {
     .bed_temp = NAN,
     .bed_target = 0.0f,
     .printer_state = "",
+    .material = "",
     .status_age_ms = UINT32_MAX,
 };
 static int64_t s_status_us = 0;  // monotonic timestamp of last complete status sample
+static int64_t s_material_us = 0; // monotonic timestamp of last material sample
 
 const char *dc_prusa_state_str(dc_prusa_state_t s)
 {
@@ -95,6 +108,8 @@ static esp_err_t nvs_save(const dc_prusa_config_t *cfg)
 // (whose evt->user_data plumbing yielded a truncated/garbled body here).
 static char s_resp[RESP_MAX];
 
+static bool state_is_printing(const char *state);
+
 // Parse printer.{temp_bed,target_bed,state} into s_status under s_lock. Returns true
 // only if the body was valid PrusaLink JSON carrying a printer object — so a wrong
 // host that answers 200 with non-JSON (e.g. another web UI's HTML) fails to OFFLINE
@@ -125,6 +140,15 @@ static bool parse_status(const char *json)
     bool ok = isfinite(bed_temp) && isfinite(bed_target) && state && state[0];
     if (ok) {
         xSemaphoreTake(s_lock, portMAX_DELAY);
+        bool was_printing = state_is_printing(s_status.printer_state);
+        bool is_printing = state_is_printing(state);
+        if (!is_printing) {
+            s_status.material[0] = '\0';
+            s_material_us = 0;
+        } else if (!was_printing) {
+            s_status.material[0] = '\0';
+            s_material_us = 0;
+        }
         s_status.bed_temp = bed_temp;
         s_status.bed_target = bed_target;
         strncpy(s_status.printer_state, state, sizeof(s_status.printer_state) - 1);
@@ -137,6 +161,42 @@ static bool parse_status(const char *json)
     return ok;
 }
 
+// Response buffer for /api/v1/job (separate from s_resp: the job body carries
+// file.meta and is larger). Only the material task touches it.
+static char s_job[JOB_RESP_MAX];
+
+// True for printer states where a filament is loaded and being laid down, so the
+// job's material is meaningful. PrusaLink reports PRINTING/PAUSED during a job.
+static bool state_is_printing(const char *state)
+{
+    return state && (strcmp(state, "PRINTING") == 0 || strcmp(state, "PAUSED") == 0);
+}
+
+// The /api/v1/job and /api/printer material parsers are pure and live in
+// dc_prusa_parse.h (dc_prusa_parse_job_material / dc_prusa_parse_printer_material)
+// so they can be host-tested against real payloads. See tests/.
+
+// Commit (or clear) material only if the response still belongs to the current print.
+// Material freshness is tracked separately from the status poll so a stalled
+// material request cannot make an old filament appear current indefinitely.
+static void commit_material(const char *material, int64_t status_sample_us)
+{
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    if (dc_prusa_material_result_current(status_sample_us, s_status_us,
+                                         s_status.state == DC_PRUSA_ONLINE,
+                                         state_is_printing(s_status.printer_state))) {
+        if (material && material[0]) {
+            strncpy(s_status.material, material, sizeof(s_status.material) - 1);
+            s_status.material[sizeof(s_status.material) - 1] = '\0';
+            s_material_us = esp_timer_get_time();
+        } else {
+            s_status.material[0] = '\0';
+            s_material_us = 0;
+        }
+    }
+    xSemaphoreGive(s_lock);
+}
+
 static void set_state(dc_prusa_state_t st)
 {
     xSemaphoreTake(s_lock, portMAX_DELAY);
@@ -144,8 +204,78 @@ static void set_state(dc_prusa_state_t st)
         ESP_LOGI(TAG, "%s -> %s", dc_prusa_state_str(s_status.state), dc_prusa_state_str(st));
     s_status.state = st;
     s_status.online = (st == DC_PRUSA_ONLINE);
-    if (st != DC_PRUSA_ONLINE) { s_status.bed_target = 0.0f; }   // fail-safe: don't hold a stale follow
+    if (st != DC_PRUSA_ONLINE) {
+        s_status.bed_target = 0.0f;      // fail-safe: don't hold a stale follow
+        s_status.material[0] = '\0';     // and don't hold a stale filament zone
+        s_material_us = 0;
+    }
     xSemaphoreGive(s_lock);
+}
+
+// GET `path` on the configured host into `buf`. Returns bytes read (>= 0) on HTTP
+// 200, or -1 on timeout, open/read failure, or non-200 (e.g. 204 no-job). This runs
+// only on the material task; even a fragmented response cannot delay status polling.
+static int http_get(esp_http_client_handle_t client, char *url, size_t url_sz,
+                    const dc_prusa_config_t *cfg, const char *path,
+                    char *buf, size_t buf_sz)
+{
+    snprintf(url, url_sz, "http://%s:%u%s", cfg->host, (unsigned)cfg->port, path);
+    buf[0] = '\0';
+    esp_http_client_set_url(client, url);
+    esp_http_client_set_method(client, HTTP_METHOD_GET);
+    esp_http_client_set_header(client, "X-Api-Key", cfg->api_key);
+    esp_http_client_set_header(client, "Accept", "application/json");
+    esp_http_client_set_timeout_ms(client, MATERIAL_TIMEOUT_MS);
+    if (esp_http_client_open(client, 0) != ESP_OK) return -1;
+    if (esp_http_client_fetch_headers(client) < 0) {
+        esp_http_client_close(client);
+        return -1;
+    }
+    if (esp_http_client_get_status_code(client) != 200) {
+        esp_http_client_close(client);
+        return -1;
+    }
+    int total = 0, r = 0;
+    while (total < (int)buf_sz - 1) {
+        r = esp_http_client_read(client, buf + total, (int)buf_sz - 1 - total);
+        if (r <= 0) break;
+        total += r;
+    }
+    if (r < 0 || total >= (int)buf_sz - 1) {
+        esp_http_client_close(client);
+        return -1;
+    }
+    buf[total > 0 ? total : 0] = '\0';
+    esp_http_client_close(client);
+    return total;
+}
+
+// Second poll step: resolve the printing filament, but only while a print is
+// active. Prefer the modern v1 /api/v1/job file.meta.filament_type (present for
+// PrusaLink-parsed files); when that is absent — e.g. a file sent onto USB, which
+// PrusaLink does not parse — fall back to the legacy /api/printer
+// telemetry.material (the only reliable signal in that case). Clears the material
+// (-> AUTO idle) when neither reports one. Uses the dedicated material client + URL.
+static void poll_job(esp_http_client_handle_t client, char *url, size_t url_sz,
+                     const dc_prusa_config_t *cfg, int64_t status_sample_us)
+{
+    char material[DC_PRUSA_MAT_MAX];
+
+    // 1) Modern v1 job metadata.
+    int n = http_get(client, url, url_sz, cfg, "/api/v1/job", s_job, JOB_RESP_MAX);
+    if (n > 0 && dc_prusa_parse_job_material(s_job, material, sizeof(material))) {
+        commit_material(material, status_sample_us);
+        return;
+    }
+
+    // 2) Legacy telemetry.material fallback (loaded filament, always present).
+    n = http_get(client, url, url_sz, cfg, "/api/printer", s_job, JOB_RESP_MAX);
+    if (n > 0 && dc_prusa_parse_printer_material(s_job, material, sizeof(material))) {
+        commit_material(material, status_sample_us);
+        return;
+    }
+
+    commit_material(NULL, status_sample_us);   // no material -> AUTO idle
 }
 
 static void poll_once(esp_http_client_handle_t client, char *url, size_t url_sz)
@@ -158,6 +288,9 @@ static void poll_once(esp_http_client_handle_t client, char *url, size_t url_sz)
     snprintf(url, url_sz, "http://%s:%u/api/v1/status", cfg.host, (unsigned)cfg.port);
     s_resp[0] = '\0';
 
+    // Status polling owns this client and always keeps its full timeout. Material
+    // requests use a separate client in a separate task.
+    esp_http_client_set_timeout_ms(client, HTTP_TIMEOUT_MS);
     esp_http_client_set_url(client, url);
     esp_http_client_set_method(client, HTTP_METHOD_GET);
     esp_http_client_set_header(client, "X-Api-Key", cfg.api_key);
@@ -184,22 +317,45 @@ static void poll_once(esp_http_client_handle_t client, char *url, size_t url_sz)
     // answers 200 with non-JSON must never look like a connected printer.
     if (total <= 0 || !parse_status(s_resp)) { set_state(DC_PRUSA_OFFLINE); return; }
     set_state(DC_PRUSA_ONLINE);
+    // Keep /job I/O out of this task: ESP-IDF's timeout is per network operation,
+    // so a fragmented response can outlast the timeout and stall status polling.
+    if (s_material_task) xTaskNotifyGive(s_material_task);
 }
 
 static void poll_task(void *arg)
 {
     (void)arg;
-    esp_http_client_config_t hc = {
-        .url = "http://127.0.0.1/api/v1/status",   // replaced per poll
-        .timeout_ms = HTTP_TIMEOUT_MS,
-        .keep_alive_enable = false,                // fresh connection each poll (5s cadence)
-    };
-    esp_http_client_handle_t client = esp_http_client_init(&hc);
-    if (!client) { ESP_LOGE(TAG, "http client init failed"); vTaskDelete(NULL); return; }
     static char url[128];
     for (;;) {
-        poll_once(client, url, sizeof(url));
+        poll_once(s_status_client, url, sizeof(url));
         vTaskDelay(pdMS_TO_TICKS(POLL_PERIOD_MS));
+    }
+}
+
+static void material_poll_task(void *arg)
+{
+    (void)arg;
+    static char url[128];
+    for (;;) {
+        // Notifications coalesce while a previous material response is slow.
+        (void)ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+
+        dc_prusa_config_t cfg;
+        char state[sizeof(s_status.printer_state)];
+        int64_t status_sample_us;
+        xSemaphoreTake(s_lock, portMAX_DELAY);
+        cfg = s_cfg;
+        strncpy(state, s_status.printer_state, sizeof(state) - 1);
+        state[sizeof(state) - 1] = '\0';
+        status_sample_us = s_status_us;
+        bool active = s_status.state == DC_PRUSA_ONLINE && state_is_printing(state);
+        xSemaphoreGive(s_lock);
+
+        if (!active) {
+            commit_material(NULL, status_sample_us);
+            continue;
+        }
+        poll_job(s_material_client, url, sizeof(url), &cfg, status_sample_us);
     }
 }
 
@@ -222,8 +378,43 @@ esp_err_t dc_prusa_start(void)
     set_state(DC_PRUSA_CONNECTING);
     ESP_LOGI(TAG, "polling http://%s:%u/api/v1/status every %d ms",
              cfg.host, (unsigned)cfg.port, POLL_PERIOD_MS);
+    esp_http_client_config_t status_hc = {
+        .url = "http://127.0.0.1/api/v1/status",   // replaced per poll
+        .timeout_ms = HTTP_TIMEOUT_MS,
+        .keep_alive_enable = false,
+    };
+    esp_http_client_config_t material_hc = {
+        .url = "http://127.0.0.1/api/v1/job",      // replaced per request
+        .timeout_ms = MATERIAL_TIMEOUT_MS,
+        .keep_alive_enable = false,
+    };
+    // Each task owns its client. Sharing one client would serialize /job reads
+    // with the freshness-critical /status poll even though they use separate URLs.
+    s_status_client = esp_http_client_init(&status_hc);
+    if (!s_status_client) return ESP_ERR_NO_MEM;
+    s_material_client = esp_http_client_init(&material_hc);
+    if (!s_material_client) {
+        esp_http_client_cleanup(s_status_client);
+        s_status_client = NULL;
+        return ESP_ERR_NO_MEM;
+    }
+    if (xTaskCreate(material_poll_task, "dc_prusa_mat", 5120, NULL, 3,
+                    &s_material_task) != pdPASS) {
+        s_material_task = NULL;
+        esp_http_client_cleanup(s_material_client);
+        esp_http_client_cleanup(s_status_client);
+        s_material_client = NULL;
+        s_status_client = NULL;
+        return ESP_ERR_NO_MEM;
+    }
     if (xTaskCreate(poll_task, "dc_prusa", 5120, NULL, 4, &s_task) != pdPASS) {
         s_task = NULL;
+        vTaskDelete(s_material_task);
+        s_material_task = NULL;
+        esp_http_client_cleanup(s_material_client);
+        esp_http_client_cleanup(s_status_client);
+        s_material_client = NULL;
+        s_status_client = NULL;
         return ESP_ERR_NO_MEM;
     }
     return ESP_OK;
@@ -263,9 +454,10 @@ esp_err_t dc_prusa_get_status(dc_prusa_status_t *out)
         xSemaphoreTake(s_lock, portMAX_DELAY);
         *out = s_status;
         sample_us = s_status_us;
+        int64_t material_us = s_material_us;
         xSemaphoreGive(s_lock);
+        dc_prusa_material_apply_freshness(out, esp_timer_get_time(), material_us);
     }
-
     dc_prusa_status_apply_freshness(out, esp_timer_get_time(), sample_us);
     return ESP_OK;
 }

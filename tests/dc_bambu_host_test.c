@@ -82,11 +82,20 @@ int main(void)
     // --- active-filament tri-state ---
     // PRESENT: AMS active tray carries a type.
     expect_fila("ams tray0 PETG",
-        "{\"print\":{\"ams\":{\"ams\":[{\"tray\":[{\"tray_type\":\"PETG\"},{\"tray_type\":\"PLA\"}]}],\"tray_now\":\"0\"},\"vt_tray\":{\"tray_type\":\"\"}}}",
+        "{\"print\":{\"ams\":{\"ams\":[{\"id\":\"0\",\"tray\":[{\"id\":\"0\",\"tray_type\":\"PETG\"},{\"id\":\"1\",\"tray_type\":\"PLA\"}]}],\"tray_now\":\"0\"},\"vt_tray\":{\"tray_type\":\"\"}}}",
         DC_FILA_PRESENT, "PETG");
     expect_fila("ams tray1 PLA",
-        "{\"print\":{\"ams\":{\"ams\":[{\"tray\":[{\"tray_type\":\"PETG\"},{\"tray_type\":\"PLA\"}]}],\"tray_now\":\"1\"}}}",
+        "{\"print\":{\"ams\":{\"ams\":[{\"id\":\"0\",\"tray\":[{\"id\":\"0\",\"tray_type\":\"PETG\"},{\"id\":\"1\",\"tray_type\":\"PLA\"}]}],\"tray_now\":\"1\"}}}",
         DC_FILA_PRESENT, "PLA");
+    // PRESENT: a later ordinary AMS unit resolves by unit/tray IDs rather than
+    // payload position.
+    expect_fila("ams unit1 tray1 PETG-CF",
+        "{\"print\":{\"ams\":{\"ams\":[{\"id\":\"0\",\"tray\":[{\"id\":\"0\",\"tray_type\":\"PLA\"}]},{\"id\":\"1\",\"tray\":[{\"id\":\"0\"},{\"id\":\"1\",\"tray_type\":\"PETG-CF\"}]}],\"tray_now\":\"5\"}}}",
+        DC_FILA_PRESENT, "PETG-CF");
+    // PRESENT: AMS HT is a single-slot unit whose tray_now is the unit ID.
+    expect_fila("ams ht unit128 PETG",
+        "{\"print\":{\"ams\":{\"ams\":[{\"id\":\"128\",\"tray\":[{\"id\":\"0\",\"tray_type\":\"PETG\"}]}],\"tray_now\":\"128\"}}}",
+        DC_FILA_PRESENT, "PETG");
     // PRESENT: external spool.
     expect_fila("ext spool ABS",
         "{\"print\":{\"ams\":{\"tray_now\":\"254\"},\"vt_tray\":{\"id\":\"254\",\"tray_type\":\"ABS\"}}}",
@@ -97,8 +106,12 @@ int main(void)
         DC_FILA_EMPTY, NULL);
     // EMPTY: active AMS slot with an empty type (unloaded) -> clear.
     expect_fila("ams tray0 empty",
-        "{\"print\":{\"ams\":{\"ams\":[{\"tray\":[{\"tray_type\":\"\"}]}],\"tray_now\":\"0\"}}}",
+        "{\"print\":{\"ams\":{\"ams\":[{\"id\":\"0\",\"tray\":[{\"id\":\"0\",\"tray_type\":\"\"}]}],\"tray_now\":\"0\"}}}",
         DC_FILA_EMPTY, NULL);
+    // ABSENT: an ID-only tray does not explicitly report its material.
+    expect_fila("ams tray2 missing type",
+        "{\"print\":{\"ams\":{\"ams\":[{\"id\":\"0\",\"tray\":[{\"id\":\"2\"}]}],\"tray_now\":\"2\"}}}",
+        DC_FILA_ABSENT, NULL);
     // ABSENT: a delta report that omits filament state -> keep prior (no clobber).
     expect_fila("delta no filament",
         "{\"print\":{\"bed_temper\":60.0,\"chamber_temper\":40.0}}",
@@ -116,8 +129,34 @@ int main(void)
     expect_fila("ext spool empty",
         "{\"print\":{\"vt_tray\":{\"id\":\"254\",\"tray_type\":\"\"}}}",
         DC_FILA_EMPTY, NULL);
+    // PRESENT: a complete AMS object can still be used when the outer report is
+    // truncated later in the controller's reassembly buffer.
+    expect_fila("truncated after ams",
+        "{\"print\":{\"ams\":{\"ams\":[{\"id\":\"0\",\"tray\":[{\"id\":\"0\"},{\"id\":\"1\",\"tray_type\":\"PETG\"}]}],\"tray_now\":\"1\"},\"bed_temper\":70,\"later_incomplete\":{",
+        DC_FILA_PRESENT, "PETG");
     // The reviewer's PETG -> no-spool transition: an EMPTY report tells parse_report
     // to clear the stored PETG (see dc_bambu.c); ABSENT deltas leave it untouched.
+
+    // Missing or truncated material fields preserve prior material; only an
+    // explicit empty type or no-spool selection clears it, including AMS HT.
+    expect_fila("ams ht missing type",
+        "{\"print\":{\"ams\":{\"ams\":[{\"id\":\"128\",\"tray\":[{\"id\":\"0\"}]}],\"tray_now\":\"128\"}}}",
+        DC_FILA_ABSENT, NULL);
+    expect_fila("ams ht explicit empty",
+        "{\"print\":{\"ams\":{\"ams\":[{\"id\":\"128\",\"tray\":[{\"id\":\"0\",\"tray_type\":\"\"}]}],\"tray_now\":\"128\"}}}",
+        DC_FILA_EMPTY, NULL);
+    expect_fila("ams ht type-only delta",
+        "{\"print\":{\"ams\":{\"ams\":[{\"id\":\"128\",\"tray\":[{\"id\":\"0\",\"tray_type\":\"PETG\"}]}]}}}",
+        DC_FILA_ABSENT, NULL);
+    expect_fila("ams ht truncated tray",
+        "{\"print\":{\"ams\":{\"ams\":[{\"id\":\"128\",\"tray\":[{\"id\":\"0\",\"tray_type\":\"PE",
+        DC_FILA_ABSENT, NULL);
+    expect_fila("ams explicit empty",
+        "{\"print\":{\"ams\":{\"ams\":[{\"id\":\"0\",\"tray\":[{\"id\":\"2\",\"tray_type\":\"\"}]}],\"tray_now\":\"2\"}}}",
+        DC_FILA_EMPTY, NULL);
+    expect_fila("explicit no spool",
+        "{\"print\":{\"ams\":{\"tray_now\":\"255\"}}}",
+        DC_FILA_EMPTY, NULL);
 
     // --- filament -> zone matching (case-insensitive prefix) ---
     expect_zone("PETG", 1);
