@@ -73,8 +73,12 @@ static int con_vprintf(const char *fmt, va_list ap)
     if (n < (int)sizeof line) {
         con_append(line, n);
     } else {
-        con_append(line, (int)sizeof line - 1 - (int)TRUNCATION_MARKER_LEN);
-        con_append(TRUNCATION_MARKER, (int)TRUNCATION_MARKER_LEN);
+        // Compose the bounded replacement before taking the ring lock.
+        // A single append keeps the marker adjacent to this log entry even
+        // when other tasks log concurrently, and advances write_seq once.
+        const size_t prefix_len = sizeof line - 1 - TRUNCATION_MARKER_LEN;
+        memcpy(line + prefix_len, TRUNCATION_MARKER, TRUNCATION_MARKER_LEN);
+        con_append(line, (int)sizeof line - 1);
     }
     int r = s_prev_vprintf ? s_prev_vprintf(fmt, ap2) : 0;
     va_end(ap2);
