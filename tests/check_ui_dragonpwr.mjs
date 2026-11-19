@@ -163,6 +163,22 @@ const c2={outputs:{mains:true,usb1:false},restore:"off",meter:null,printer:null,
   assert.equal(e["pwr-mains"].textContent,"On");
   assert.equal(e["pwr-controls"].hidden,false);
 }
+// A delayed info response after disconnect must never restore a stale /power
+// link from the last live snapshot.
+{
+  const {context:c,elements:e}=setup();
+  let resolveInfo;
+  c.fetch=()=>new Promise(resolve=>{resolveInfo=resolve;});
+  c.applyPwr({...c2,boot_id:"pending-boot"});
+  assert.equal(e["pwr-controls"].hidden,true);
+  c.pwrSetConn(false);
+  resolveInfo({ok:true,json:()=>Promise.resolve({
+    boot_id:"pending-boot",ui:{schema:1,product:"dragonpwr"},
+    capabilities:["power_switch"]})});
+  await new Promise(setImmediate);
+  assert.equal(e["pwr-controls"].hidden,true);
+  assert.match(e["pwr-mains"].textContent,/disconnected/i);
+}
 // Reviewer P2: a failed initial info lookup is retried by subsequent state,
 // without fabricating capabilities before a matching descriptor is recovered.
 {

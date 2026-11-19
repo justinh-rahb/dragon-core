@@ -2031,6 +2031,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     pwrApp.dataset.online=connected?'1':'0';
     u('pwr-conn',connected?'Connected':'Reconnecting…');
     if(!connected){
+      pwrLatest=null; // an in-flight descriptor must not resurrect stale output state
       u('pwr-mains','Unknown — disconnected');
       u('pwr-usb','Unknown — disconnected');
       $('pwr-mains').className='pwr-value pwr-unknown';
