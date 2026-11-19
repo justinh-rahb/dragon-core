@@ -113,6 +113,26 @@ if (!/Zones do nothing in Manual\/Off\./.test(html)) {
   throw new Error("filament zones card must state that zones apply only in AUTO");
 }
 
+// Follow-bed edits reveal the chamber target immediately, without waiting for a
+// later SSE snapshot. AUTO status text must remain valid after a filament zone
+// takes over or an explicit Off zone holds heat off.
+if (!html.includes("touched.followBed=1;\n    if(last) renderAuto(last);")) {
+  throw new Error("follow-bed checkbox changes must render immediately from the last state");
+}
+for (const marker of [
+  "Engaged — chamber target is ",
+  "Armed — chamber heat is currently off.",
+  "armed · chamber heat off",
+]) {
+  if (!html.includes(marker)) throw new Error(`AUTO status must remain phase-accurate: ${marker}`);
+}
+for (const stale of [
+  "preheating to '+tgt+' °C until a filament zone is reported.",
+  "waiting for the printer bed to start heating.",
+]) {
+  if (html.includes(stale)) throw new Error(`stale AUTO phase text remains: ${stale}`);
+}
+
 // Common maintenance identity must render before descriptor compatibility or
 // capability gating can return/throw. This keeps diagnostics useful even when a
 // newer product descriptor reaches an older family SPA.
