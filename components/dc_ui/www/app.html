@@ -283,6 +283,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
 .mode-status.is-live{ color: var(--foreground); }
 .mode-action{ margin-top: 2px; }
 .mode-action .btn{ min-height: 46px; font-size: 15px; gap: 7px; }
+.mode-actions-manual{ display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; }
 .btn-danger{ border-color: transparent; color: var(--primary-foreground);
   background: var(--destructive); }
 .btn-danger:not(:disabled):hover{ background: color-mix(in srgb, var(--destructive) 82%, transparent); }
@@ -769,14 +770,17 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
         </div>
         <div class="mode-status" id="m-status"></div>
         <div class="mode-footer">
-          <div class="mode-action"><button class="btn btn-primary btn-block" type="button" id="m-action"><svg class="icon"><use href="#i-play"/></svg> <span>Start heating</span></button></div>
+          <div class="mode-action mode-actions-manual">
+            <button class="btn btn-primary btn-block" type="button" id="m-start" disabled><svg class="icon"><use href="#i-play"/></svg> <span>Start heating</span></button>
+            <button class="btn btn-danger btn-block" type="button" id="m-stop"><svg class="icon"><use href="#i-square"/></svg> <span>Stop</span></button>
+          </div>
           <div class="mode-feedback" id="m-msg" role="status" aria-live="polite"></div>
         </div>
       </section>
 
-      <!-- Automatic: follow the printer bed above a threshold (auto command). -->
+      <!-- Automatic: follow the selected printer source (bed or filament zones). -->
       <section class="page-only mode-controls" data-page-content="auto" data-capability="auto">
-        <p id="a-desc"><strong>Automatic mode:</strong> while a print runs, the chamber follows the loaded filament's profile — set the per-filament targets in <strong>Filament Zones</strong> on the dashboard. With no print, or a filament that has no zone set, the chamber stays idle. Requires a connected printer (Klipper or Bambu).</p>
+        <p id="a-desc"><strong>Automatic mode:</strong> while a print runs, the chamber follows the loaded filament's profile — set the per-filament targets in <strong>Filament Zones</strong> on the dashboard. With no print, or a filament that has no zone set, the chamber stays idle. Requires a connected printer (PrusaLink, Klipper, or Bambu).</p>
         <div class="ctl-group" hidden>
           <div class="ctl-head">
             <span class="form-label">Chamber target</span>
@@ -868,7 +872,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
         </div>
 
         <!-- Filament chamber zones: shown when the control source follows filament
-             profiles (Bambu or Klipper). Edits apply live via /api/v2/zones (no reboot). -->
+             profiles (PrusaLink, Bambu, or Klipper). Edits apply live via /api/v2/zones (no reboot). -->
         <div class="set-card zones-card" id="zones-card" hidden>
           <h3><svg class="icon"><use href="#i-spool"/></svg> Filament zones</h3>
           <p class="set-note">Chamber target per filament; zones apply only in <b>AUTO</b> (°C, 0 = off). Zones do nothing in Manual/Off.</p>
@@ -1024,6 +1028,20 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
           <p class="set-note">Correct a mis-reading sensor by up to ±5&nbsp;°C. The corrected value drives both the display and every safety cutoff, so the range is deliberately bounded — calibration can never disable a fault.</p>
           <button class="btn btn-primary btn-block" type="button" id="c-cal-save"><svg class="icon"><use href="#i-thermometer"/></svg> <span>Save calibration</span></button>
           <div class="mode-feedback" id="c-cal-msg" role="status" aria-live="polite"></div>
+        </div>
+
+        <!-- Optional DragonBreath setting; shown only when its /settings API
+             advertises the persisted thermistor mapping fields. -->
+        <div class="set-card" id="s-thermistor-card" hidden>
+          <h3>Thermistor mapping</h3>
+          <div class="set-head-row">
+            <span class="set-note" style="margin:0">Swap thermistors</span>
+            <button class="btn" type="button" id="s-swap-thermistors" aria-pressed="false"><span>Off</span></button>
+          </div>
+          <p class="set-note">Enable only when the two board JST sockets have the chamber and heater-element thermistor connectors plugged into the opposite sockets. This swaps both ADC inputs, displayed readings, and their safety roles. Save the choice, then reboot to apply it.</p>
+          <p class="set-note" id="s-swap-active">Currently active: normal mapping.</p>
+          <button class="btn btn-primary btn-block" type="button" id="s-swap-save"><svg class="icon"><use href="#i-thermometer"/></svg> <span>Save thermistor mapping</span></button>
+          <div class="mode-feedback" id="s-swap-msg" role="status" aria-live="polite"></div>
         </div>
 
         <!-- Status LEDs master enable (POST /settings?leds_enabled=). -->
@@ -1856,8 +1874,8 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     return s.mode==='off' ? '—' : sourceLabel(s.source);
   }
 
-  /* Filament chamber zones (Bambu only). Fetched once when the Bambu card first
-     shows; each input edit is applied live via POST /api/v2/zones (no reboot). */
+  /* Filament chamber zones. Fetched once when a filament-aware source first
+     shows them; each input edit is applied live via POST /api/v2/zones (no reboot). */
   var zonesLoaded = false, zonesCustomMax = 8;
   function esc(t){ return String(t).replace(/[<>&"]/g, function(ch){
     return {'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[ch]; }); }
@@ -2325,24 +2343,25 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     var dryRow = s.drying.active;
     $('db-drying-row').hidden = !dryRow;
     if(dryRow) u('db-drying', fmtDur(s.drying.remaining_seconds)+' left');
-    /* Printer/source row is source-aware: Klipper/Bambu follow a printer bed (show
+    /* Printer/source row is source-aware: PrusaLink, Klipper, and Bambu report a bed (show
        link + bed); Home Assistant has no printer to follow (HA is the controller),
        so relabel the row and show the source instead of a misleading "not connected". */
     var src = s.environment.control_source || 'klipper';
     var isBambu = (src==='bambu');
     /* Filament chamber zones apply to any bed source that reports the active
-       filament — Bambu and Klipper (Moonraker). But when the Klipper [dragonbreath]
+       filament — PrusaLink, Bambu, and Klipper (Moonraker). But when the Klipper [dragonbreath]
        helper is active it owns chamber heat directly (M141/M191), AUTO is
        unavailable, and the zones — which only feed AUTO — are inert, so hide both
        zone cards too. Bambu is unaffected: klipper_helper_present is only ever set
        on the Klipper/Moonraker source. */
-    var usesZones = (isBambu || (src==='klipper')) && !s.environment.klipper_helper_present;
+    var isPrusa = (src==='prusa');
+    var usesZones = (isPrusa || isBambu || (src==='klipper')) && !s.environment.klipper_helper_present;
     var zc = document.getElementById('zones-card');
     var zcc = document.getElementById('zones-custom-card');
     if(zc){ zc.hidden = !usesZones; if(usesZones) loadZones(); }
     if(zcc) zcc.hidden = !usesZones;
     /* Show the active print's filament in the status card (Bambu bambu_filament,
-       Klipper material). */
+       PrusaLink/Klipper material). */
     var frow = $('db-filament-row');
     if(frow){
       var fila = isBambu ? (s.environment.bambu_printing ? s.environment.bambu_filament : null)
@@ -2577,17 +2596,28 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
   }
   function setStatus(id, text, mod){ var e=$(id); if(!e){return;} e.className='mode-status'+(mod?' '+mod:''); e.textContent=text; }
 
+  // Manual Start and Stop are distinct controls with stable commands. A device
+  // state update can disable Start but can never turn a Stop tap into Start.
+  function manualStartAllowed(s){
+    // Manual heating may override AUTO or DRYING; product policy decides how
+    // each transition and subsequent recovery are handled. Never start while
+    // already in a manual run, without valid state, or with safety inhibited.
+    return !!(s && (s.mode==='off' || s.mode==='auto' || s.mode==='drying')
+      && s.safety && !s.safety.inhibited && !s.safety.fault_latched);
+  }
   function renderManual(s){
     var run = s.mode==='power_on';
-    setAction('m-action', run?'Stop':'Start heating', run?'#i-square':'#i-play', run);
+    var blocked = !!(s.safety && (s.safety.inhibited || s.safety.fault_latched));
+    $('m-start').disabled = !manualStartAllowed(s);
     if(run) setStatus('m-status', 'Heating to '+Math.round(s.target.effective_c)+' °C.', 'is-live');
-    else if(s.safety.inhibited || s.safety.fault_latched) setStatus('m-status', 'Safety chain not ready.', 'is-warn');
+    else if(s.safety && s.safety.fault_latched) setStatus('m-status', 'Heater off — fault latched.', 'is-warn');
+    else if(blocked) setStatus('m-status', 'Heating unavailable — safety chain not ready.', 'is-warn');
     else setStatus('m-status', 'Heater is off.');
   }
   function renderAuto(s){
     var armed = s.mode==='auto', eng = s.environment.auto_engaged;
-    // Source capability: bed-follow sources (Prusa) set the chamber via the bed
-    // threshold + target controls below; filament-aware sources (Klipper/Bambu)
+    // Source capability: bed-follow sources set the chamber via the bed threshold
+    // + target controls below; filament-aware sources (PrusaLink/Klipper/Bambu)
     // follow the loaded filament's zone. Toggle the AUTO card to match the source.
     var bedFollow = isBedFollow(s);
     var tgtGrp = document.getElementById('a-range').closest('.ctl-group');
@@ -2597,7 +2627,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     var desc = document.getElementById('a-desc');
     if(desc) desc.innerHTML = bedFollow
       ? '<strong>Automatic mode:</strong> the chamber follows the printer’s bed — while a print runs it heats to the <strong>Chamber target</strong> once the bed setpoint reaches the <strong>Bed threshold</strong> below. Your printer reports no filament type, so set the bed→chamber rule here.'
-      : '<strong>Automatic mode:</strong> while a print runs, the chamber follows the loaded filament’s profile — set the per-filament targets in <strong>Filament Zones</strong> on the dashboard. With no print, or a filament that has no zone set, the chamber stays idle. Requires a connected printer (Klipper or Bambu).';
+      : '<strong>Automatic mode:</strong> while a print runs, the chamber follows the loaded filament’s profile — set the per-filament targets in <strong>Filament Zones</strong> on the dashboard. With no print, or a filament that has no zone set, the chamber stays idle. Requires a connected printer (PrusaLink, Klipper, or Bambu).';
     var actBtn = $('a-action');
     // The dragonbreath-klipper extension is itself an active chamber controller, so
     // AUTO can't run alongside it. Make that visible: block arming and say why. If
@@ -2682,10 +2712,17 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     b.addEventListener('click', function(){ var p=b.dataset.drypreset.split(','); setField('dryT', Number(p[0]), true); setField('dryH', Number(p[1]), true); });
   });
 
-  /* Primary actions -> v2 commands. Start toggles to Stop when the mode is live. */
-  $('m-action').addEventListener('click', function(){
-    if(last && last.mode==='power_on'){ lease=null; runCmd('m-msg', command('off', {})); }
-    else { lease=null; runCmd('m-msg', command('power_on', {target_c:fields.man.val}).then(function(r){ lease=r.lease_id||null; touched.man=0; })); }
+  /* A Stop click always sends OFF, even if the device stopped or faulted before
+     the press. Start has its own button and rechecks the latest known snapshot;
+     the product's authoritative safety policy still checks the request. */
+  $('m-stop').addEventListener('click', function(){
+    lease=null;
+    runCmd('m-msg', command('off', {}));
+  });
+  $('m-start').addEventListener('click', function(){
+    if(!manualStartAllowed(last)) return;
+    lease=null;
+    runCmd('m-msg', command('power_on', {target_c:fields.man.val}).then(function(r){ lease=r.lease_id||null; touched.man=0; }));
   });
   $('a-action').addEventListener('click', function(){
     if(last && last.mode==='auto'){ runCmd('a-msg', command('off', {})); }
@@ -2754,6 +2791,10 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
       if(isFinite(s.filter_temp)) setSset('filt', s.filter_temp);
       if(typeof s.filter_auto==='boolean') setFiltEn(s.filter_auto);
       if(typeof s.leds_enabled==='boolean') setLedToggle(s.leds_enabled);
+      var swapCard=$('s-thermistor-card');
+      if(swapCard) swapCard.hidden=typeof s.swap_thermistors!=='boolean';
+      if(typeof s.swap_thermistors==='boolean') setThermistorSwap(s.swap_thermistors);
+      if(typeof s.swap_thermistors_active==='boolean') showThermistorSwapState(s.swap_thermistors_active, s.swap_thermistors);
     }).catch(function(){});
   }
   document.querySelectorAll('[data-sstep]').forEach(function(b){
@@ -2903,6 +2944,37 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
       .then(function(s){ setLedToggle(s && typeof s.leds_enabled==='boolean' ? s.leds_enabled : next);
         flash('s-leds-msg', next?'LEDs on.':'LEDs off.', 'is-ok'); })
       .catch(function(j){ flash('s-leds-msg', 'Failed: '+((j&&(j.message||j.error))||'error'), 'is-error'); });
+  });
+
+  /* Swap the logical chamber/PTC roles for boards with crossed sensor inputs.
+     Firmware stages the choice in NVS and activates it only after reboot. */
+  function setThermistorSwap(on){
+    var b=$('s-swap-thermistors'); if(!b) return;
+    b.setAttribute('aria-pressed', on?'true':'false');
+    b.querySelector('span').textContent=on?'On':'Off';
+  }
+  function showThermistorSwapState(active, configured){
+    var e=$('s-swap-active'); if(!e) return;
+    var activeName=active?'swapped':'normal';
+    e.textContent=active===configured
+      ? 'Currently active: '+activeName+' mapping.'
+      : 'Currently active: '+activeName+' mapping. Reboot required to apply the saved choice.';
+  }
+  if($('s-swap-thermistors')) $('s-swap-thermistors').addEventListener('click',function(){
+    setThermistorSwap($('s-swap-thermistors').getAttribute('aria-pressed')!=='true');
+  });
+  if($('s-swap-save')) $('s-swap-save').addEventListener('click',function(){
+    var selected=$('s-swap-thermistors').getAttribute('aria-pressed')==='true';
+    flash('s-swap-msg','Saving…');
+    request('/settings?swap_thermistors='+(selected?1:0),{})
+      .then(function(s){
+        var configured=s&&typeof s.swap_thermistors==='boolean'?s.swap_thermistors:selected;
+        var active=s&&typeof s.swap_thermistors_active==='boolean'?s.swap_thermistors_active:!configured;
+        setThermistorSwap(configured);
+        showThermistorSwapState(active,configured);
+        flash('s-swap-msg',active===configured?'Saved; this mapping is already active.':'Saved. Reboot the device to apply it.','is-ok');
+      })
+      .catch(function(j){flash('s-swap-msg','Save failed: '+((j&&(j.message||j.error))||'error'),'is-error');});
   });
 
   /* Control token set/clear -> POST /api/v2/token. On success this browser keeps
