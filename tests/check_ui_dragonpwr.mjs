@@ -27,6 +27,8 @@ function setup(){
   const context={
     app:makeElement(),ventApp:makeElement(),statusApp:makeElement(),
     wheezeApp:makeElement(),pwrApp:elements["pwr-app"],pwrCaps:{},
+    pwrBoot:null,pwrCapsBoot:null,pwrInfoVerified:false,pwrInfoPending:false,
+    pwrInfoRetryAt:0,pwrLatest:null,
     product:"dragonbreath",
     fetch:()=>Promise.reject(Error("descriptor unavailable")),
     document:{title:"DragonBreath"},
