@@ -2035,6 +2035,13 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     // /api/v2/info may fail while state polling succeeds. Select the correct
     // product surface from the state shape, but do not synthesize capabilities.
     if(pwrApp.hidden)applyDeviceInfo({firmware:s.firmware,ui:{schema:1,product:'dragonpwr',display_name:'DragonPWR'}});
+    // State snapshots carry the current boot identity on DragonPWR.
+    // Refresh it even when the browser never observes a disconnect.
+    if(typeof s.firmware==='string'){
+      u('pwr-version',s.firmware);u('pwr-footer-version',s.firmware);
+    }
+    if(typeof s.device_id==='string')u('pwr-device',s.device_id);
+    if(typeof s.boot_id==='string')u('pwr-boot',s.boot_id);
     var a=s.outputs,m=!!pwrCaps.power_switch&&typeof a.mains==='boolean',
       v=!!pwrCaps.usb_switch&&typeof a.usb1==='boolean';
     u('pwr-mains',m?(a.mains?'On':'Off'):'Unavailable');
