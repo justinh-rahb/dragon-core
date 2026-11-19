@@ -29,6 +29,11 @@ ESP_ERROR_CHECK(dc_logtail_register(server, &logtail));
 With `dc_portal`, call `dc_logtail_register()` from `register_product_routes`, so
 the route is installed before the portal's `/*` catch-all.
 
+Before starting the HTTP server, configure `max_resp_headers` to at least 9
+(plus any slots used by product headers). The ESP-IDF default is 8. When using
+`dc_portal`, pass the adjusted HTTP server configuration via
+`dc_portal_config_t.httpd_config`.
+
 A zero-initialised config is rejected. A NULL `authorize` never means public
 access; unauthenticated export requires `allow_unauthenticated = true`. The first
 successful registration latches the configuration for the boot; re-registering
@@ -110,8 +115,10 @@ conflicts with current device state; its metadata lets a client resynchronise
 without a second request. Clients must ignore `Dragon-Log-*` headers on any
 status other than `200` and `409`.
 
-The eight `200` headers exactly fill ESP-IDF's default `max_resp_headers` (8).
-`Cache-Control: no-store` is added only when the server has a spare slot.
+Both `200` and `409` require `Cache-Control: no-store`, so caches cannot replay
+an empty read or old boot metadata. They require 9 and 6 free header slots
+respectively. If any required header cannot be installed, the handler returns
+`500` without sending log bytes.
 
 ## Reboot semantics
 

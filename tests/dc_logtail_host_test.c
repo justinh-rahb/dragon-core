@@ -398,7 +398,7 @@ static void test_headers_cover_full_u64_range(void)
         for (size_t j = i + 1; j < r.header_count; ++j)
             distinct &= strcmp(r.headers[i].name, r.headers[j].name) != 0;
     expect_true("header names are distinct", distinct);
-    expect_true("200 uses exactly ESP-IDF's default 8 response-header slots",
+    expect_true("200 uses exactly eight evidence headers before cache control",
                 r.header_count == DC_LOGTAIL_MAX_HEADERS && DC_LOGTAIL_MAX_HEADERS == 8);
 }
 

@@ -5,8 +5,7 @@
 // the wire is written only by httpd_resp_send().
 //
 // Invariant under test: a 200 or 409 is never transmitted with incomplete
-// evidence metadata, for every max_resp_headers value, and the optional
-// Cache-Control header can never displace a required one.
+// evidence metadata or Cache-Control: no-store, for any header-slot budget.
 
 #include "dc_evlog.h"
 #include "dc_logtail.h"
@@ -214,6 +213,12 @@ static bool has_all(const httpd_req_t *r, const char *const *names, size_t n)
     return true;
 }
 
+static bool has_no_store(const httpd_req_t *r)
+{
+    const char *value = wire_hdr(r, "Cache-Control");
+    return value != NULL && strcmp(value, "no-store") == 0;
+}
+
 static size_t evidence_hdr_count(const httpd_req_t *r)
 {
     size_t n = 0;
@@ -240,8 +245,10 @@ static httpd_req_t *run(const char *query, bool auth_ok, size_t max_hdrs)
 // The core invariant, checked on every transmitted response.
 static bool evidence_complete_or_not_nominal(const httpd_req_t *r)
 {
-    if (is_status(r, "200")) return has_all(r, REQUIRED_200, N_ELEMS(REQUIRED_200));
-    if (is_status(r, "409")) return has_all(r, REQUIRED_409, N_ELEMS(REQUIRED_409));
+    if (is_status(r, "200"))
+        return has_no_store(r) && has_all(r, REQUIRED_200, N_ELEMS(REQUIRED_200));
+    if (is_status(r, "409"))
+        return has_no_store(r) && has_all(r, REQUIRED_409, N_ELEMS(REQUIRED_409));
     return true;
 }
 
@@ -299,10 +306,10 @@ static void test_registration(void)
                 dc_logtail_register((httpd_handle_t)1, &changed_ctx) == ESP_ERR_INVALID_STATE);
 }
 
-static void test_default_slots_complete_200(void)
+static void test_complete_200(void)
 {
     produce(300);
-    httpd_req_t *r = run("cursor=0", true, 8);
+    httpd_req_t *r = run("cursor=0", true, 9);
     uint64_t start = 0, end = 0, write = 0, lost = 1, cap = 0;
     bool nums = wire_u64(r, "Dragon-Log-Start-Seq", &start) &&
                 wire_u64(r, "Dragon-Log-End-Seq", &end) &&
@@ -311,38 +318,41 @@ static void test_default_slots_complete_200(void)
                 wire_u64(r, "Dragon-Log-Capacity", &cap);
     bool body = r->wire_body_len == 300;
     for (size_t i = 0; body && i < r->wire_body_len; ++i) body = r->wire_body[i] == byte_at(i);
-    expect_true("max_resp_headers=8: single send, 200, octet-stream",
+    expect_true("max_resp_headers=9: single send, 200, octet-stream",
                 r->send_calls == 1 && is_status(r, "200") &&
                 strcmp(r->wire_type, "application/octet-stream") == 0);
-    expect_true("max_resp_headers=8: all eight evidence headers, nothing else",
-                r->wire_hdr_count == 8 && has_all(r, REQUIRED_200, 8) &&
-                wire_hdr(r, "Cache-Control") == NULL);
-    expect_true("max_resp_headers=8: boot id is the latched copy",
+    expect_true("max_resp_headers=9: all evidence headers and no-store",
+                r->wire_hdr_count == 9 && evidence_complete_or_not_nominal(r));
+    expect_true("max_resp_headers=9: boot id is the latched copy",
                 strcmp(wire_hdr(r, "Dragon-Log-Boot-Id"), "boot-7f3a") == 0);
-    expect_true("max_resp_headers=8: metadata matches body byte-exactly",
+    expect_true("max_resp_headers=9: metadata matches body byte-exactly",
                 nums && body && start == 0 && end == 300 && write == 300 &&
                 lost == 0 && cap == DC_EVLOG_CONSOLE_BYTES &&
                 end - start == r->wire_body_len);
     free(r);
 }
 
-static void test_spare_slot_adds_cache_control_last(void)
+static void test_empty_poll_and_new_bytes(void)
 {
-    httpd_req_t *r = run("cursor=0", true, 9);
-    expect_true("max_resp_headers=9: 200 with eight evidence headers first",
-                is_status(r, "200") && r->wire_hdr_count == 9 && has_all(r, REQUIRED_200, 8));
-    bool order = true;
-    for (size_t i = 0; i < 8; ++i) order &= strncmp(r->wire_field[i], "Dragon-Log-", 11) == 0;
-    expect_true("max_resp_headers=9: optional Cache-Control only in the spare slot",
-                order && strcmp(r->wire_field[8], "Cache-Control") == 0 &&
-                strcmp(r->wire_value[8], "no-store") == 0);
+    char q[48];
+    snprintf(q, sizeof(q), "cursor=%llu", (unsigned long long)s_produced);
+    httpd_req_t *r = run(q, true, 9);
+    expect_true("empty read sends 200 with no-store and complete evidence",
+                is_status(r, "200") && r->wire_body_len == 0 &&
+                evidence_complete_or_not_nominal(r));
+    free(r);
+    produce(1);
+    r = run(q, true, 9);
+    expect_true("polling the same cursor again returns the new byte with no-store",
+                is_status(r, "200") && r->wire_body_len == 1 &&
+                evidence_complete_or_not_nominal(r));
     free(r);
 }
 
 static void test_insufficient_slots_fail_closed(void)
 {
     bool all_ok = true;
-    for (size_t k = 0; k < 8; ++k) {
+    for (size_t k = 0; k < 9; ++k) {
         httpd_req_t *r = run("cursor=0", true, k);
         bool ok = r->send_calls == 1 &&
                   strcmp(r->wire_status, "500 Internal Server Error") == 0 &&
@@ -350,43 +360,35 @@ static void test_insufficient_slots_fail_closed(void)
                   r->wire_body_len > 0 && r->wire_body[0] == '{' &&
                   strstr((const char *)r->wire_body, "\"ok\":false") != NULL &&
                   r->wire_hdr_count == k &&
-                  wire_hdr(r, "Cache-Control") == NULL;
+                  (k == 0 ? evidence_hdr_count(r) == 0 : has_no_store(r));
         if (!ok) printf("  max_resp_headers=%zu: status='%s' hdrs=%zu sends=%d\n",
                         k, r->wire_status, r->wire_hdr_count, r->send_calls);
         all_ok &= ok;
         free(r);
     }
-    expect_true("max_resp_headers 0..7: valid read is a deterministic 500, never 200", all_ok);
+    expect_true("max_resp_headers 0..8: valid read is a deterministic 500, never 200", all_ok);
 }
 
 static void test_future_cursor_slots(void)
 {
     char q[48];
     snprintf(q, sizeof(q), "cursor=%llu", (unsigned long long)(s_produced + 1));
-    httpd_req_t *r = run(q, true, 8);
-    bool first_five = r->wire_hdr_count == 6;
-    for (size_t i = 0; first_five && i < 5; ++i)
-        first_five = strncmp(r->wire_field[i], "Dragon-Log-", 11) == 0;
-    expect_true("409 at max_resp_headers=8: five resync headers, JSON body",
+    httpd_req_t *r = run(q, true, 6);
+    expect_true("409 at max_resp_headers=6: five resync headers, no-store, JSON body",
                 r->send_calls == 1 && is_status(r, "409") &&
-                evidence_hdr_count(r) == 5 && has_all(r, REQUIRED_409, 5) &&
+                r->wire_hdr_count == 6 && evidence_complete_or_not_nominal(r) &&
                 strcmp(r->wire_type, "application/json") == 0);
-    expect_true("409 at max_resp_headers=8: optional Cache-Control only after evidence",
-                first_five && strcmp(r->wire_field[5], "Cache-Control") == 0);
-    free(r);
-    r = run(q, true, 5);
-    expect_true("409 at max_resp_headers=5: still complete",
-                is_status(r, "409") && has_all(r, REQUIRED_409, 5));
     free(r);
     bool all_ok = true;
-    for (size_t k = 0; k < 5; ++k) {
+    for (size_t k = 0; k < 6; ++k) {
         r = run(q, true, k);
         all_ok &= r->send_calls == 1 &&
                   strcmp(r->wire_status, "500 Internal Server Error") == 0 &&
-                  r->wire_hdr_count == k;
+                  r->wire_hdr_count == k &&
+                  (k == 0 ? evidence_hdr_count(r) == 0 : has_no_store(r));
         free(r);
     }
-    expect_true("409 at max_resp_headers 0..4: deterministic 500, never 409", all_ok);
+    expect_true("409 at max_resp_headers 0..5: deterministic 500, never 409", all_ok);
 }
 
 static void test_rejections_need_no_slots(void)
@@ -431,15 +433,15 @@ static void test_invariant_sweep(void)
                 free(r);
             }
     printf("  swept %d responses\n", responses);
-    expect_true("sweep: no 200/409 ever transmitted with incomplete metadata", all_ok);
+    expect_true("sweep: every 200/409 carries complete metadata and no-store", all_ok);
 }
 
 int main(void)
 {
     dc_evlog_console_init();
     test_registration();
-    test_default_slots_complete_200();
-    test_spare_slot_adds_cache_control_last();
+    test_complete_200();
+    test_empty_poll_and_new_bytes();
     test_insufficient_slots_fail_closed();
     test_future_cursor_slots();
     test_rejections_need_no_slots();

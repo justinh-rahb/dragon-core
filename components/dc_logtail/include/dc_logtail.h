@@ -50,6 +50,9 @@ typedef struct {
 // Registers GET DC_LOGTAIL_URI on `server`. Call from one registration
 // task, not concurrently from multiple tasks. Register before any wildcard
 // catch-all GET route (with dc_portal: from register_product_routes).
+// Configure max_resp_headers before starting the server. A 200 needs at least
+// 9 free slots and a 409 needs 6, including mandatory Cache-Control: no-store.
+// Responses with insufficient slots fail with 500 before sending log bytes.
 //
 // The first successful route registration latches the configuration for the
 // rest of the boot. A failed initial registration leaves it unset, so a
