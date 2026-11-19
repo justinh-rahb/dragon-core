@@ -126,6 +126,10 @@ typedef struct {
 // Resolve the chamber target for a filament type string. Longest case-insensitive
 // prefix match over built-ins + customs (so a custom "PETG-CF" beats "PETG"). 0 = none.
 uint8_t dc_bambu_zone_target(const char *filament);
+// Resolve whether a filament matches a configured zone, including a zone set to
+// Off (0 °C). Returns false only when no zone matches; writes the target if out
+// is non-NULL.
+bool dc_bambu_zone_resolve(const char *filament, uint8_t *target_c);
 
 // Fill `out` (capacity `max`) with built-in zones then custom profiles; returns the
 // number written (<= DC_BAMBU_ZONE_MAX).

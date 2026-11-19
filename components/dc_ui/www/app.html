@@ -829,6 +829,8 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
         </div>
         <div class="mode-status" id="a-status"></div>
         <div class="mode-footer">
+          <label><input type="checkbox" id="a-follow-bed"> Follow the bed for preheat</label>
+          <small id="a-follow-bed-note" class="form-text">Uses the chamber target shown above until the printer reports a filament zone.</small>
           <div class="mode-action"><button class="btn btn-primary btn-block" type="button" id="a-action"><svg class="icon"><use href="#i-refresh"/></svg> <span>Follow filament profile</span></button></div>
           <div class="mode-feedback" id="a-msg" role="status" aria-live="polite"></div>
         </div>
@@ -1922,7 +1924,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     if(st==='drying'){ var m=Math.round((s.drying.remaining_seconds||0)/60); return 'Filament drying — '+m+' min left. Safety chain healthy.'; }
     if(st==='waiting') return isBedFollow(s)
       ? 'Armed. Waiting for the printer bed to reach the threshold.'
-      : 'Armed. Waiting for a print with a filament profile.';
+      : 'AUTO is armed. Chamber heat is currently off.';
     if(st==='heating') return s.heater.output ? 'Output active. Safety chain healthy.' : 'Heater demand — waiting on the safety chain.';
     if(st==='cooldown') return 'Residual-heat purge — fan clearing heat, heater off.';
     if(st==='filtering') return 'Fan-only filtration — heater off, monitoring active.';
@@ -2504,9 +2506,9 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     var autoRow = s.mode==='auto';
     $('db-auto-row').hidden = !autoRow;
     if(autoRow) u('db-auto', s.environment.auto_engaged
-      ? (isBedFollow(s) ? 'following the bed · ' : 'heating to filament profile · ')+Math.round(s.target.effective_c)+' °C'
+      ? (isBedFollow(s) ? 'following the bed · ' : ((s.params&&s.params.auto_follow_bed) ? 'engaged · ' : 'heating to filament profile · '))+Math.round(s.target.effective_c)+' °C'
       : s.environment.auto_filtering ? 'filtering (fan only)'
-      : (isBedFollow(s) ? 'waiting for the bed threshold' : 'waiting for a print'));
+      : (isBedFollow(s) ? 'waiting for the bed threshold' : 'armed · chamber heat off'));
     var dryRow = s.drying.active;
     $('db-drying-row').hidden = !dryRow;
     if(dryRow) u('db-drying', fmtDur(s.drying.remaining_seconds)+' left');
@@ -2787,14 +2789,21 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     // + target controls below; filament-aware sources (PrusaLink/Klipper/Bambu)
     // follow the loaded filament's zone. Toggle the AUTO card to match the source.
     var bedFollow = isBedFollow(s);
+    var followBed = $('a-follow-bed').checked;
     var tgtGrp = document.getElementById('a-range').closest('.ctl-group');
     var bedGrp = document.getElementById('a-bed-range').closest('.ctl-group');
-    if(tgtGrp) tgtGrp.hidden = !bedFollow;
+    if(tgtGrp) tgtGrp.hidden = !bedFollow && !followBed;
     if(bedGrp) bedGrp.hidden = !bedFollow;
+    var followBedBox = $('a-follow-bed');
+    if(followBedBox) followBedBox.disabled = armed;
+    var followBedNote = $('a-follow-bed-note');
+    if(followBedNote) followBedNote.textContent = armed
+      ? 'Turn AUTO off to change this option.'
+      : 'Uses the chamber target shown above until the printer reports a filament zone.';
     var desc = document.getElementById('a-desc');
     if(desc) desc.innerHTML = bedFollow
       ? '<strong>Automatic mode:</strong> the chamber follows the printer’s bed — while a print runs it heats to the <strong>Chamber target</strong> once the bed setpoint reaches the <strong>Bed threshold</strong> below. Your printer reports no filament type, so set the bed→chamber rule here.'
-      : '<strong>Automatic mode:</strong> while a print runs, the chamber follows the loaded filament’s profile — set the per-filament targets in <strong>Filament Zones</strong> on the dashboard. With no print, or a filament that has no zone set, the chamber stays idle. Requires a connected printer (PrusaLink, Klipper, or Bambu).';
+      : '<strong>Automatic mode:</strong> while a print runs, the chamber follows the loaded filament’s profile — set the per-filament targets in <strong>Filament Zones</strong> on the dashboard. With <strong>Follow the bed for preheat</strong> enabled, it uses the chamber target above until a filament zone is reported. With no print, or without preheat and a matching zone, the chamber stays idle. Requires a connected printer.';
     var actBtn = $('a-action');
     // The dragonbreath-klipper extension is itself an active chamber controller, so
     // AUTO can't run alongside it. Make that visible: block arming and say why. If
@@ -2813,7 +2822,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
       return;
     }
     if(actBtn) actBtn.disabled = false;
-    setAction('a-action', armed?'Disengage':(bedFollow?'Follow the printer bed':'Follow filament profile'),
+    setAction('a-action', armed?'Disengage':(bedFollow?'Follow the printer bed':(followBed?'Preheat from bed, then follow filament':'Follow filament profile')),
               armed?'#i-square':'#i-refresh', armed);
     var mat = s.environment.material;
     var tgt = Math.round(s.target.effective_c);
@@ -2824,8 +2833,10 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
       else if(armed) setStatus('a-status', 'Armed — waiting for the printer bed to reach the threshold.', 'is-live');
       else setStatus('a-status', 'Not armed.');
     }
-    else if(eng) setStatus('a-status', 'Engaged — heating to '+(mat?mat+' ':'')+'profile ('+tgt+' °C).', 'is-live');
-    else if(armed) setStatus('a-status', 'Armed — waiting for a print with a filament profile.', 'is-live');
+    else if(eng) setStatus('a-status', followBed
+      ? 'Engaged — chamber target is '+tgt+' °C.'
+      : 'Engaged — heating to '+(mat?mat+' ':'')+'profile ('+tgt+' °C).', 'is-live');
+    else if(armed) setStatus('a-status', 'Armed — chamber heat is currently off.', 'is-live');
     else setStatus('a-status', 'Not armed.');
   }
   function renderDry(s){
@@ -2845,6 +2856,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     if(!touched.man)   setField('man',   s.mode==='power_on' ? rq : pr.manual_target_c);
     if(!touched.autoT) setField('autoT', s.mode==='auto'     ? rq : pr.auto_target_c);
     if(!touched.autoB) setField('autoB', s.mode==='auto' ? s.environment.auto_bed_threshold_c : pr.auto_bed_threshold_c);
+    if(!touched.followBed) $('a-follow-bed').checked = !!pr.auto_follow_bed;
     if(!touched.dryT)  setField('dryT',  s.mode==='drying'   ? rq : pr.dry_target_c);
     if(!touched.dryH)  setField('dryH',  pr.dry_hours);
     /* Keep any touched target within the (possibly lowered) live ceiling. */
@@ -2893,7 +2905,11 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
   });
   $('a-action').addEventListener('click', function(){
     if(last && last.mode==='auto'){ runCmd('a-msg', command('off', {})); }
-    else runCmd('a-msg', command('auto', {target_c:fields.autoT.val, bed_threshold_c:fields.autoB.val}).then(function(){ touched.autoT=0; touched.autoB=0; }));
+    else runCmd('a-msg', command('auto', {target_c:fields.autoT.val, bed_threshold_c:fields.autoB.val, follow_bed:$('a-follow-bed').checked}).then(function(){ touched.autoT=0; touched.autoB=0; touched.followBed=0; }));
+  });
+  $('a-follow-bed').addEventListener('change', function(){
+    touched.followBed=1;
+    if(last) renderAuto(last);
   });
   $('d-action').addEventListener('click', function(){
     if(last && last.drying && last.drying.active){ runCmd('d-msg', command('drying_stop', {})); }

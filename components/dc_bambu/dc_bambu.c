@@ -636,10 +636,10 @@ static esp_err_t customs_persist(void)
     return err;
 }
 
-uint8_t dc_bambu_zone_target(const char *filament)
+bool dc_bambu_zone_resolve(const char *filament, uint8_t *target_c)
 {
     if (!s_zones_loaded) zones_load();
-    if (!filament || !filament[0]) return 0;
+    if (!filament || !filament[0]) return false;
     // Longest-prefix match over customs + built-in aliases (a custom "PETG-CF" beats
     // "PETG"). Customs are listed FIRST so that on an EQUAL-length tie the custom
     // wins — this is what lets a custom "ABS"/"ASA" override the combined built-in
@@ -652,7 +652,16 @@ uint8_t dc_bambu_zone_target(const char *filament)
     for (int i = 0; i < DC_BAMBU_ZONE_COUNT; i++)
         for (int a = 0; ZONE_MATCH[i][a]; a++) { names[n] = ZONE_MATCH[i][a]; temps[n] = s_zone_c[i]; n++; }
     int idx = dc_bambu_zone_match(filament, names, n);
-    return idx < 0 ? 0 : temps[idx];
+    if (idx < 0) return false;
+    if (target_c) *target_c = temps[idx];
+    return true;
+}
+
+uint8_t dc_bambu_zone_target(const char *filament)
+{
+    uint8_t target = 0;
+    (void)dc_bambu_zone_resolve(filament, &target);
+    return target;
 }
 
 int dc_bambu_zone_get_all(dc_bambu_zone_t *out, int max)
