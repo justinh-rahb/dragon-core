@@ -212,6 +212,45 @@ static void test_line_within_buffer_is_captured_unchanged(void)
                 n == added && memcmp(tail, "short line\n", added) == 0);
 }
 
+// The exact vsnprintf boundary is significant: 199 bytes fit CON_LINE=200
+// with a NUL, but 200 bytes must reserve room for the truncation marker.
+static void test_exact_capture_buffer_boundary(void)
+{
+    reset_console_ring();
+    char fit[200];
+    memset(fit, 'A', sizeof(fit));
+    fit[198] = '\n';
+    fit[199] = '\0';
+
+    dc_evlog_console_view_t before, after;
+    char discard[64];
+    dc_evlog_console_snapshot_begin(&before, discard, sizeof(discard));
+    capture_log("%s", fit);
+    dc_evlog_console_snapshot_begin(&after, discard, sizeof(discard));
+
+    size_t added = (size_t)(after.write_seq - before.write_seq);
+    char tail[256];
+    size_t n = capture_tail(tail, sizeof(tail), added);
+    expect_true("199-byte line is captured unchanged with its newline",
+                added == 199 && n == added && memcmp(tail, fit, added) == 0);
+
+    char overflow[201];
+    memset(overflow, 'B', sizeof(overflow));
+    overflow[199] = '\n';
+    overflow[200] = '\0';
+
+    dc_evlog_console_snapshot_begin(&before, discard, sizeof(discard));
+    capture_log("%s", overflow);
+    dc_evlog_console_snapshot_begin(&after, discard, sizeof(discard));
+    added = (size_t)(after.write_seq - before.write_seq);
+    n = capture_tail(tail, sizeof(tail), added);
+    const size_t marker_len = strlen("...[truncated]\n");
+    bool marker_ok = added == 199 && n == added && n >= marker_len &&
+                     memcmp(tail + n - marker_len, "...[truncated]\n", marker_len) == 0;
+    expect_true("200-byte line is marked and bounded at the exact limit",
+                marker_ok);
+}
+
 static void test_oversized_line_is_bounded_and_marked(void)
 {
     reset_console_ring();
@@ -285,6 +324,7 @@ int main(void)
     dc_evlog_console_init();
     test_empty_console_terminates();
     test_line_within_buffer_is_captured_unchanged();
+    test_exact_capture_buffer_boundary();
     test_oversized_line_is_bounded_and_marked();
     test_oversized_line_does_not_run_into_the_next_line();
     fill_console_ring();
