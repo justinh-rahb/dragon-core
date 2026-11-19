@@ -92,6 +92,23 @@ const c2={outputs:{mains:true,usb1:false},restore:"off",meter:null,printer:null,
   assert.equal(e["pwr-free"].textContent,"—");
   assert.equal(e["pwr-mains"].textContent,"Unavailable");
 }
+// F5: firmware and boot identity must track new authoritative state snapshots,
+// including OTA or a reboot that recovers before the browser detects a disconnect.
+{
+  const {context:c,elements:e}=setup();
+  c.applyDeviceInfo({firmware:"old-firmware",device_id:"device-A",boot_id:"old-boot",
+    ui:{schema:1,product:"dragonpwr"},capabilities:["polling"]});
+  c.applyPwr({...c3, firmware:"new-firmware", device_id:"device-A", boot_id:"new-boot"});
+  assert.equal(e["pwr-version"].textContent,"new-firmware");
+  assert.equal(e["pwr-footer-version"].textContent,"new-firmware");
+  assert.equal(e["pwr-device"].textContent,"device-A");
+  assert.equal(e["pwr-boot"].textContent,"new-boot");
+  // Older firmware without identity in state must not erase last known values.
+  c.applyPwr(c3);
+  assert.equal(e["pwr-version"].textContent,"new-firmware");
+  assert.equal(e["pwr-boot"].textContent,"new-boot");
+}
+
 // Product-specific shared view must not post power commands.
 const surface=section('<div class="app pwr-app"','<section class="provision-overlay"');
 assert.ok(!/fetch\s*\(|method\s*:\s*['"]POST['"]|\/api\/v2\/command/.test(surface),
