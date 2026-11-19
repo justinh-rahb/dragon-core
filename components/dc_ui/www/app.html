@@ -2679,7 +2679,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     if(!touched.man)   setField('man',   s.mode==='power_on' ? rq : pr.manual_target_c);
     if(!touched.autoT) setField('autoT', s.mode==='auto'     ? rq : pr.auto_target_c);
     if(!touched.autoB) setField('autoB', s.mode==='auto' ? s.environment.auto_bed_threshold_c : pr.auto_bed_threshold_c);
-    $('a-follow-bed').checked = !!pr.auto_follow_bed;
+    if(!touched.followBed) $('a-follow-bed').checked = !!pr.auto_follow_bed;
     if(!touched.dryT)  setField('dryT',  s.mode==='drying'   ? rq : pr.dry_target_c);
     if(!touched.dryH)  setField('dryH',  pr.dry_hours);
     /* Keep any touched target within the (possibly lowered) live ceiling. */
@@ -2728,8 +2728,9 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
   });
   $('a-action').addEventListener('click', function(){
     if(last && last.mode==='auto'){ runCmd('a-msg', command('off', {})); }
-    else runCmd('a-msg', command('auto', {target_c:fields.autoT.val, bed_threshold_c:fields.autoB.val, follow_bed:$('a-follow-bed').checked}).then(function(){ touched.autoT=0; touched.autoB=0; }));
+    else runCmd('a-msg', command('auto', {target_c:fields.autoT.val, bed_threshold_c:fields.autoB.val, follow_bed:$('a-follow-bed').checked}).then(function(){ touched.autoT=0; touched.autoB=0; touched.followBed=0; }));
   });
+  $('a-follow-bed').addEventListener('change', function(){ touched.followBed=1; });
   $('d-action').addEventListener('click', function(){
     if(last && last.drying && last.drying.active){ runCmd('d-msg', command('drying_stop', {})); }
     else runCmd('d-msg', command('drying_start', {target_c:fields.dryT.val, hours:fields.dryH.val}).then(function(){ touched.dryT=0; touched.dryH=0; }));
