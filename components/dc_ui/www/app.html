@@ -2094,8 +2094,9 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     u('pwr-largest',pwrHeap(heap.largest_block));
     u('pwr-meter',s.meter==null?'Energy metering not available':'Meter telemetry available');
     u('pwr-printer',s.printer==null?'Printer observation not configured':'Printer observation available');
-    pwrSetConn(!!valid);
+    pwrSetConn(true);
     if(!valid){
+      pwrApp.dataset.online='0';
       u('pwr-conn','State incomplete');
       u('pwr-note','Output snapshot incomplete. Last-known states are not live.');
     }
