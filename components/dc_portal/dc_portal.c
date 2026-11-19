@@ -83,6 +83,20 @@ static esp_err_t require_auth(httpd_req_t *req)
 
 static esp_err_t spa_get(httpd_req_t *req)
 {
+    /* DC_PORTAL_ROOT_REDIRECT */
+    if (
+        req != NULL &&
+        strcmp(req->uri, "/") == 0 &&
+        s_config.root_redirect != NULL &&
+        s_config.root_redirect[0] != '\0' &&
+        strcmp(s_config.root_redirect, "/") != 0
+    ) {
+        httpd_resp_set_status(req, "302 Found");
+        httpd_resp_set_hdr(req, "Location", s_config.root_redirect);
+        httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+        return httpd_resp_send(req, NULL, 0);
+    }
+
     dc_ui_asset_t asset = dc_ui_spa_asset();
 
     // Cache the SPA with an ETag tied to the firmware build (the app's ELF
