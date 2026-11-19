@@ -808,6 +808,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
         <div class="mode-status" id="a-status"></div>
         <div class="mode-footer">
           <label><input type="checkbox" id="a-follow-bed"> Follow the bed for preheat</label>
+          <small id="a-follow-bed-note" class="form-text">Uses the chamber target shown above until the printer reports a filament zone.</small>
           <div class="mode-action"><button class="btn btn-primary btn-block" type="button" id="a-action"><svg class="icon"><use href="#i-refresh"/></svg> <span>Follow filament profile</span></button></div>
           <div class="mode-feedback" id="a-msg" role="status" aria-live="polite"></div>
         </div>
@@ -2621,14 +2622,21 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     // + target controls below; filament-aware sources (PrusaLink/Klipper/Bambu)
     // follow the loaded filament's zone. Toggle the AUTO card to match the source.
     var bedFollow = isBedFollow(s);
+    var followBed = $('a-follow-bed').checked;
     var tgtGrp = document.getElementById('a-range').closest('.ctl-group');
     var bedGrp = document.getElementById('a-bed-range').closest('.ctl-group');
-    if(tgtGrp) tgtGrp.hidden = !bedFollow;
+    if(tgtGrp) tgtGrp.hidden = !bedFollow && !followBed;
     if(bedGrp) bedGrp.hidden = !bedFollow;
+    var followBedBox = $('a-follow-bed');
+    if(followBedBox) followBedBox.disabled = armed;
+    var followBedNote = $('a-follow-bed-note');
+    if(followBedNote) followBedNote.textContent = armed
+      ? 'Turn AUTO off to change this option.'
+      : 'Uses the chamber target shown above until the printer reports a filament zone.';
     var desc = document.getElementById('a-desc');
     if(desc) desc.innerHTML = bedFollow
       ? '<strong>Automatic mode:</strong> the chamber follows the printer’s bed — while a print runs it heats to the <strong>Chamber target</strong> once the bed setpoint reaches the <strong>Bed threshold</strong> below. Your printer reports no filament type, so set the bed→chamber rule here.'
-      : '<strong>Automatic mode:</strong> while a print runs, the chamber follows the loaded filament’s profile — set the per-filament targets in <strong>Filament Zones</strong> on the dashboard. With no print, or a filament that has no zone set, the chamber stays idle. Requires a connected printer (PrusaLink, Klipper, or Bambu).';
+      : '<strong>Automatic mode:</strong> while a print runs, the chamber follows the loaded filament’s profile — set the per-filament targets in <strong>Filament Zones</strong> on the dashboard. With <strong>Follow the bed for preheat</strong> enabled, it uses the chamber target above until a filament zone is reported. With no print, or without preheat and a matching zone, the chamber stays idle. Requires a connected printer.';
     var actBtn = $('a-action');
     // The dragonbreath-klipper extension is itself an active chamber controller, so
     // AUTO can't run alongside it. Make that visible: block arming and say why. If
@@ -2647,7 +2655,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
       return;
     }
     if(actBtn) actBtn.disabled = false;
-    setAction('a-action', armed?'Disengage':(bedFollow?'Follow the printer bed':'Follow filament profile'),
+    setAction('a-action', armed?'Disengage':(bedFollow?'Follow the printer bed':(followBed?'Preheat from bed, then follow filament':'Follow filament profile')),
               armed?'#i-square':'#i-refresh', armed);
     var mat = s.environment.material;
     var tgt = Math.round(s.target.effective_c);
@@ -2658,6 +2666,8 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
       else if(armed) setStatus('a-status', 'Armed — waiting for the printer bed to reach the threshold.', 'is-live');
       else setStatus('a-status', 'Not armed.');
     }
+    else if(followBed && armed && !eng) setStatus('a-status', 'Armed — waiting for the printer bed to start heating.', 'is-live');
+    else if(followBed && eng) setStatus('a-status', 'Engaged — preheating to '+tgt+' °C until a filament zone is reported.', 'is-live');
     else if(eng) setStatus('a-status', 'Engaged — heating to '+(mat?mat+' ':'')+'profile ('+tgt+' °C).', 'is-live');
     else if(armed) setStatus('a-status', 'Armed — waiting for a print with a filament profile.', 'is-live');
     else setStatus('a-status', 'Not armed.');
