@@ -292,6 +292,11 @@ static void test_registration(void)
     dc_logtail_config_t open = { .boot_id = "boot-7f3a", .allow_unauthenticated = true };
     expect_true("register: different auth mode mid-boot rejected",
                 dc_logtail_register((httpd_handle_t)1, &open) == ESP_ERR_INVALID_STATE);
+    int alternate_auth_context = 0;
+    dc_logtail_config_t changed_ctx = cfg;
+    changed_ctx.auth_ctx = &alternate_auth_context;
+    expect_true("register: different auth context mid-boot rejected",
+                dc_logtail_register((httpd_handle_t)1, &changed_ctx) == ESP_ERR_INVALID_STATE);
 }
 
 static void test_default_slots_complete_200(void)
@@ -389,6 +394,11 @@ static void test_rejections_need_no_slots(void)
     httpd_req_t *r = run("cursor=0", false, 0);
     expect_true("403 needs no header slots and leaks no metadata",
                 r->send_calls == 1 && is_status(r, "403") && r->wire_hdr_count == 0);
+    free(r);
+    r = run("cursor=x", false, 8);
+    expect_true("authorization precedes malformed cursor parsing",
+                r->send_calls == 1 && is_status(r, "403") &&
+                evidence_hdr_count(r) == 0);
     free(r);
     r = run("cursor=01", true, 0);
     expect_true("400 needs no header slots", r->send_calls == 1 &&

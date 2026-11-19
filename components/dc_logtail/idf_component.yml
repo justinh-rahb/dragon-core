@@ -1,4 +1,4 @@
-version: "0.35.2"
+version: "0.35.3"
 description: Read-only absolute-cursor HTTP export of the dc_evlog console ring
 license: MIT
 dependencies:

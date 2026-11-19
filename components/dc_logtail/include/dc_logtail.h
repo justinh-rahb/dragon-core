@@ -47,7 +47,8 @@ typedef struct {
     void *auth_ctx;                     // passed to authorize
 } dc_logtail_config_t;
 
-// Registers GET DC_LOGTAIL_URI on `server`. Register before any wildcard
+// Registers GET DC_LOGTAIL_URI on `server`. Call from one registration
+// task, not concurrently from multiple tasks. Register before any wildcard
 // catch-all GET route (with dc_portal: from register_product_routes).
 //
 // The first successful route registration latches the configuration for the
