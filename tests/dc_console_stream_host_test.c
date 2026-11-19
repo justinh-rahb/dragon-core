@@ -9,6 +9,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+// Counters linked from the opt-in FreeRTOS host stub.
+unsigned dc_console_stream_critical_enters;
+unsigned dc_console_stream_critical_exits;
 static int s_failures;
 static vprintf_like_t s_log_hook;
 
@@ -263,7 +266,13 @@ static void test_oversized_line_is_bounded_and_marked(void)
     dc_evlog_console_snapshot_begin(&before_view, discard, sizeof(discard));
     uint64_t seq_before = before_view.write_seq;
 
+    unsigned enter_before = dc_console_stream_critical_enters;
+    unsigned exit_before = dc_console_stream_critical_exits;
     capture_log("%s", oversized);
+    unsigned enters = dc_console_stream_critical_enters - enter_before;
+    unsigned exits = dc_console_stream_critical_exits - exit_before;
+    expect_true("truncated entry appended in one critical section",
+                enters == 1 && exits == 1);
 
     dc_evlog_console_view_t view;
     dc_evlog_console_snapshot_begin(&view, discard, sizeof(discard));
