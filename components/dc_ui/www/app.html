@@ -605,6 +605,28 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
 .wheeze-run{ display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
 .wheeze-actions .btn, .wheeze-run .btn{ min-height:44px; }
 @container (max-width:520px){ .wheeze-grid{ grid-template-columns:1fr; } .wheeze-visual{ width:112px; } }
+/* DragonPWR: family shell and tokens, device-specific layout. */
+.pwr-main{min-width:0;min-height:0;overflow:auto;padding:12px;display:flex;flex-direction:column;gap:10px}
+.pwr-main .app-version{margin-top:auto}
+.pwr-tab[data-pwr-page="settings"]{margin-top:auto}
+.pwr-grid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(185px,.85fr);gap:10px}
+.pwr-wide{grid-column:1/-1}
+.pwr-hero{display:flex;align-items:center;gap:16px}
+.pwr-icon{display:grid;place-items:center;width:105px;aspect-ratio:1;flex:none;border-radius:50%;color:var(--primary);background:radial-gradient(circle,color-mix(in srgb,var(--primary) 20%,transparent),transparent 70%);border:1px solid var(--border)}
+.pwr-hero h2{font-size:27px;margin:0 0 5px}
+.pwr-note{font-size:12px;color:var(--muted-foreground)}
+.pwr-chip{display:inline-block;margin-top:10px;padding:5px 9px;border-radius:var(--radius-full);background:color-mix(in srgb,var(--primary) 12%,transparent);color:var(--primary);font-size:11px;font-weight:600}
+.pwr-rows{display:grid;gap:8px;margin-top:12px}
+.pwr-row{display:flex;justify-content:space-between;align-items:center;gap:10px;border-top:1px solid var(--border);padding:10px 0 0}
+.pwr-row small{display:block;color:var(--muted-foreground)}
+.pwr-value{font-weight:700}
+.pwr-unknown{color:var(--muted-foreground)}
+.pwr-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;margin:12px 0}
+.pwr-metric{background:var(--input);border-radius:var(--radius-lg);padding:12px}
+.pwr-metric small{display:block;color:var(--muted-foreground)}
+.pwr-metric strong{display:block;margin-top:4px;font-size:18px;overflow-wrap:anywhere}
+.pwr-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+@container (max-width:520px){.pwr-grid{grid-template-columns:1fr}.pwr-icon{width:75px}.pwr-hero h2{font-size:23px}}
 .provision-overlay{ position:fixed; inset:0; z-index:20; overflow:auto; padding:18px;
   background:var(--background); }
 .provision-shell{ width:min(680px,100%); margin:0 auto; display:flex; flex-direction:column; gap:10px; }
@@ -1377,6 +1399,49 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
   </div>
 </div>
 
+
+<div class="app pwr-app" id="pwr-app" data-online="0" hidden>
+ <div class="shell">
+  <nav class="rail" aria-label="DragonPWR navigation">
+   <div class="connection" aria-label="Connection"><i class="dot"></i><span id="pwr-conn">Connecting…</span></div>
+   <button class="tab" type="button" aria-label="Power dashboard" aria-selected="true"><svg class="icon"><use href="#i-house"/></svg></button>
+   <a class="tab pwr-tab" data-pwr-page="settings" href="#setup" data-open-provisioning aria-label="Device setup"><svg class="icon"><use href="#i-settings"/></svg></a>
+  </nav>
+  <main class="pwr-main">
+   <div class="pwr-grid">
+    <article class="card pwr-hero">
+      <div class="pwr-icon" aria-hidden="true"><svg class="icon" style="width:48px;height:48px"><use href="#i-power"/></svg></div>
+      <div><h2>DragonPWR</h2><p class="pwr-note">Power distribution and device health.</p><span class="pwr-chip" id="pwr-cap">Checking support</span></div>
+    </article>
+    <article class="card"><h3>Device</h3><dl class="status-detail">
+      <div><dt>Firmware</dt><dd id="pwr-version">—</dd></div>
+      <div><dt>Device ID</dt><dd id="pwr-device">—</dd></div>
+      <div><dt>Boot ID</dt><dd id="pwr-boot">—</dd></div>
+      <div><dt>Restore policy</dt><dd id="pwr-restore">Unavailable</dd></div>
+    </dl></article>
+    <article class="card pwr-wide">
+      <h3>Outputs</h3><p class="pwr-note" id="pwr-note">Waiting for the device state.</p>
+      <div class="pwr-rows">
+       <div class="pwr-row"><div><strong>AC outlet</strong><small>Mains power</small></div><span class="pwr-value pwr-unknown" id="pwr-mains">Unavailable</span></div>
+       <div class="pwr-row"><div><strong>USB 1</strong><small>Switched USB power</small></div><span class="pwr-value pwr-unknown" id="pwr-usb">Unavailable</span></div>
+      </div>
+      <div class="pwr-actions"><a href="/power" class="btn" id="pwr-controls" hidden>Open output controls</a><a href="#setup" class="btn" data-open-provisioning>Settings &amp; setup</a></div>
+    </article>
+    <article class="card pwr-wide">
+     <h3>System health</h3>
+     <div class="pwr-metrics">
+      <div class="pwr-metric"><small>Free heap</small><strong id="pwr-free">—</strong></div>
+      <div class="pwr-metric"><small>Minimum free</small><strong id="pwr-min">—</strong></div>
+      <div class="pwr-metric"><small>Largest block</small><strong id="pwr-largest">—</strong></div>
+     </div>
+     <p class="pwr-note" id="pwr-meter">Energy metering not available</p>
+     <p class="pwr-note" id="pwr-printer">Printer observation not configured</p>
+    </article>
+   </div>
+   <div class="app-version">DragonPWR <span id="pwr-footer-version">—</span></div>
+  </main>
+ </div>
+</div>
 <section class="provision-overlay" id="dc-provisioning" hidden aria-label="Device setup">
   <div class="provision-shell">
     <div class="provision-head"><div><strong id="dc-setup-title">Device setup</strong><div class="set-note" id="dc-setup-mode"></div></div>
@@ -1419,6 +1484,11 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
   var app = document.querySelector('.app');
   var ventApp = document.getElementById('dv-app');
   var statusApp = document.getElementById('ds-app');
+  var pwrApp = document.getElementById('pwr-app');
+  var pwrCaps={};
+  // Switching claims belong to a verified descriptor for the current boot.
+  var pwrBoot=null, pwrCapsBoot=null, pwrInfoVerified=false;
+  var pwrInfoPending=false, pwrInfoRetryAt=0, pwrLatest=null;
   var wheezeApp = document.getElementById('dw-app');
   var ventWasCalibrating = false;
   var product = 'dragonbreath';
@@ -1594,7 +1664,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     if(apMode==='off'&&!apSel.querySelector('option[value="off"]')){var apOff=document.createElement('option');apOff.value='off';apOff.textContent='Off (set via API)';apSel.appendChild(apOff);}
     apSel.value=apMode;
     renderProductSetup(d.product_setup);
-    var tokCard=$('dc-token-card'); if(tokCard) tokCard.hidden=(product!=='dragonbreath');
+    var tokCard=$('dc-token-card'); if(tokCard) tokCard.hidden=(product!=='dragonbreath'&&product!=='dragonpwr');
     addPwToggles();
     if(d.last_failure)setupMessage('dc-wifi-msg','Could not join '+d.last_failure.ssid+': '+d.last_failure.reason,true);
   }
@@ -1673,6 +1743,22 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     /* An absent schema is the pre-descriptor compatibility case. An unknown
        schema must not reinterpret identity or hide product surfaces. */
     if(ui.schema!=null && ui.schema!==1) return;
+    if(ui.product==='dragonpwr'){
+      product='dragonpwr';app.hidden=true;ventApp.hidden=true;statusApp.hidden=true;wheezeApp.hidden=true;pwrApp.hidden=false;
+      // Ignore late descriptors from a previous boot. If state knows the boot,
+      // a descriptor without a matching boot ID cannot authorize switching.
+      if(pwrBoot!==null && i.boot_id!==pwrBoot) return;
+      pwrCaps={};
+      pwrCapsBoot=typeof i.boot_id==='string'?i.boot_id:null;
+      pwrInfoVerified=Array.isArray(i.capabilities);
+      if(pwrInfoVerified)pwrInfoRetryAt=0;
+      if(pwrInfoVerified)i.capabilities.forEach(function(c){pwrCaps[c]=true});
+      document.title=ui.display_name||'DragonPWR';
+      u('pwr-version',i.firmware||'—');u('pwr-footer-version',i.firmware||'—');
+      u('pwr-device',i.device_id||'—');u('pwr-boot',i.boot_id||'—');
+      u('pwr-cap',pwrCaps.power_switch||pwrCaps.usb_switch?'Switch support advertised':'Switching unavailable');
+      return;
+    }
     if(ui.product==='dragonvent'){
       product='dragonvent';
       app.hidden=true;
@@ -1936,6 +2022,86 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     fetch('/api/v2/zones').then(function(r){return r.json();})
       .then(function(d){ if(d.custom_max) zonesCustomMax = d.custom_max; renderZones(d.zones||[]); })
       .catch(function(){ zonesLoaded = false; });
+  }
+
+
+  /* DragonPWR must not reinterpret null/unavailable outputs as physical OFF.
+     Never authorize switching using a descriptor from a previous boot. */
+  function pwrSetConn(connected){
+    pwrApp.dataset.online=connected?'1':'0';
+    u('pwr-conn',connected?'Connected':'Reconnecting…');
+    if(!connected){
+      pwrLatest=null; // an in-flight descriptor must not resurrect stale output state
+      u('pwr-mains','Unknown — disconnected');
+      u('pwr-usb','Unknown — disconnected');
+      $('pwr-mains').className='pwr-value pwr-unknown';
+      $('pwr-usb').className='pwr-value pwr-unknown';
+      $('pwr-controls').hidden=true;
+      u('pwr-note','Connection lost. Last-known output states are not live.');
+    }
+  }
+  function pwrHeap(n){return typeof n==='number'&&isFinite(n)?Math.round(n/1024)+' KiB':'—';}
+  function pwrRequestInfo(){
+    if(pwrInfoVerified||pwrInfoPending||Date.now()<pwrInfoRetryAt) return;
+    pwrInfoPending=true;
+    pwrInfoRetryAt=Date.now()+5000; // bounded retry under SSE and polling
+    fetch('/api/v2/info',{cache:'no-store'})
+      .then(function(r){if(!r.ok)throw 0;return r.json();})
+      .then(function(i){
+        if(!i||!i.ui||i.ui.schema!==1||i.ui.product!=='dragonpwr')return;
+        applyDeviceInfo(i); // rejects a descriptor for an obsolete boot
+        if(pwrInfoVerified&&pwrLatest)applyPwr(pwrLatest);
+      }).catch(function(){})
+      .finally(function(){pwrInfoPending=false;});
+  }
+  function applyPwr(s){
+    if(!s) return;
+    // State shape may identify DragonPWR when the initial info GET failed.
+    if(pwrApp.hidden&&s.outputs&&Object.prototype.hasOwnProperty.call(s.outputs,'mains'))
+      applyDeviceInfo({firmware:s.firmware,ui:{schema:1,product:'dragonpwr',display_name:'DragonPWR'}});
+    if(pwrApp.hidden) return;
+    pwrLatest=s;
+    if(typeof s.boot_id==='string'&&s.boot_id!==pwrBoot){
+      pwrBoot=s.boot_id;
+      if(pwrCapsBoot!==pwrBoot){
+        pwrCaps={};pwrCapsBoot=null;pwrInfoVerified=false;
+        u('pwr-cap','Switching unavailable');
+      }
+      // Force an immediate descriptor read for the newly observed boot.
+      pwrInfoRetryAt=0;
+    }
+    if(typeof s.firmware==='string'){
+      u('pwr-version',s.firmware);u('pwr-footer-version',s.firmware);
+    }
+    if(typeof s.device_id==='string')u('pwr-device',s.device_id);
+    if(typeof s.boot_id==='string')u('pwr-boot',s.boot_id);
+    var a=s.outputs;
+    var valid=a&&Object.prototype.hasOwnProperty.call(a,'mains')&&
+      Object.prototype.hasOwnProperty.call(a,'usb1');
+    var capsCurrent=pwrInfoVerified&&(pwrBoot===null||pwrCapsBoot===pwrBoot);
+    var m=!!valid&&capsCurrent&&!!pwrCaps.power_switch&&typeof a.mains==='boolean',
+      v=!!valid&&capsCurrent&&!!pwrCaps.usb_switch&&typeof a.usb1==='boolean';
+    u('pwr-mains',m?(a.mains?'On':'Off'):'Unavailable');
+    u('pwr-usb',v?(a.usb1?'On':'Off'):'Unavailable');
+    $('pwr-mains').className='pwr-value'+(m?'':' pwr-unknown');
+    $('pwr-usb').className='pwr-value'+(v?'':' pwr-unknown');
+    $('pwr-controls').hidden=!(m||v);
+    u('pwr-note',!valid?'Output snapshot incomplete. Last-known states are not live.':
+      m||v?'Reported logical states. Physical switching needs separate qualification.':
+      'Output control unavailable. Physical output state has not been measured.');
+    u('pwr-restore',typeof s.restore==='string'?s.restore:'Unavailable');
+    var heap=s.heap||{};
+    u('pwr-free',pwrHeap(heap.free));u('pwr-min',pwrHeap(heap.min_free));
+    u('pwr-largest',pwrHeap(heap.largest_block));
+    u('pwr-meter',s.meter==null?'Energy metering not available':'Meter telemetry available');
+    u('pwr-printer',s.printer==null?'Printer observation not configured':'Printer observation available');
+    pwrSetConn(true);
+    if(!valid){
+      pwrApp.dataset.online='0';
+      u('pwr-conn','State incomplete');
+      u('pwr-note','Output snapshot incomplete. Last-known states are not live.');
+    }
+    pwrRequestInfo();
   }
 
   /* ---- DragonVent adapter. DragonVent deliberately exposes a compact state
@@ -2276,6 +2442,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
   }
 
   function apply(s){
+    if(product==='dragonpwr'||(s&&s.outputs&&Object.prototype.hasOwnProperty.call(s.outputs,'mains'))){applyPwr(s);return;}
     if(s && s.wheeze){ applyWheeze(s); return; }
     if(s && s.vent){ applyVent(s); return; }
     if(s && s.printer && s.wifi && s.lighting){ applyStatus(s); return; }
@@ -2457,7 +2624,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     fetch('/api/v2/state', {cache:'no-store'})
       .then(function(r){ if(!r.ok) throw 0; return r.json(); })
       .then(function(s){ apply(s); pollDelay=2000; })
-      .catch(function(){ product==='dragonvent'?ventSetConn(false):product==='dragonstatus'?statusSetConn(false):product==='dragonwheeze'?wheezeSetConn(false):setConn(false); pollDelay=Math.min(10000, Math.round(pollDelay*1.6)); })
+      .catch(function(){ product==='dragonvent'?ventSetConn(false):product==='dragonstatus'?statusSetConn(false):product==='dragonwheeze'?wheezeSetConn(false):product==='dragonpwr'?pwrSetConn(false):setConn(false); pollDelay=Math.min(10000, Math.round(pollDelay*1.6)); })
       .finally(function(){ polling=false; setTimeout(poll, pollDelay+Math.random()*250); });
   }
   function events(){
@@ -2465,7 +2632,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     function ev(e){ seen=true; try{ apply(JSON.parse(e.data)); }catch(_){} }
     es.addEventListener('state', ev);
     es.addEventListener('telemetry', ev);
-    es.onerror=function(){ es.close(); product==='dragonvent'?ventSetConn(false):product==='dragonstatus'?statusSetConn(false):product==='dragonwheeze'?wheezeSetConn(false):setConn(false); if(!seen) poll(); else setTimeout(poll,1000); };
+    es.onerror=function(){ es.close(); product==='dragonvent'?ventSetConn(false):product==='dragonstatus'?statusSetConn(false):product==='dragonwheeze'?wheezeSetConn(false):product==='dragonpwr'?pwrSetConn(false):setConn(false); if(!seen) poll(); else setTimeout(poll,1000); };
   }
 
   /* ---- Navigation: rail tabs. Home = live Dashboard; manual/auto/dry = U2 control
