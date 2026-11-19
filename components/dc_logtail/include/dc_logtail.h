@@ -50,8 +50,9 @@ typedef struct {
 // Registers GET DC_LOGTAIL_URI on `server`. Register before any wildcard
 // catch-all GET route (with dc_portal: from register_product_routes).
 //
-// The first successful call latches the configuration for the rest of the
-// boot. Later calls, e.g. after the product restarts its HTTP server, must
+// The first successful route registration latches the configuration for the
+// rest of the boot. A failed initial registration leaves it unset, so a
+// corrected configuration may retry. Later calls, e.g. after a restart, must
 // pass an identical configuration; anything else returns
 // ESP_ERR_INVALID_STATE so the boot identity can never change mid-boot.
 //

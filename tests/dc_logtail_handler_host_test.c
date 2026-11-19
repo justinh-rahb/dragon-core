@@ -50,6 +50,7 @@ static vprintf_like_t s_log_hook;
 static uint64_t s_produced;
 static httpd_uri_t s_route;
 static int s_registrations;
+static esp_err_t s_next_registration_error;
 
 // ---- esp_log hook stub --------------------------------------------------
 static int discard_vprintf(const char *fmt, va_list ap)
@@ -91,6 +92,11 @@ static void produce(uint64_t n)
 esp_err_t httpd_register_uri_handler(httpd_handle_t handle, const httpd_uri_t *uri)
 {
     if (handle == NULL || uri == NULL) return ESP_ERR_INVALID_ARG;
+    if (s_next_registration_error != ESP_OK) {
+        esp_err_t err = s_next_registration_error;
+        s_next_registration_error = ESP_OK;
+        return err;
+    }
     s_route = *uri;
     s_registrations++;
     return ESP_OK;
@@ -254,6 +260,17 @@ static void test_registration(void)
     expect_true("register: invalid boot id rejected",
                 dc_logtail_register((httpd_handle_t)1, &bad_id) == ESP_ERR_INVALID_ARG);
 
+    // A failed FIRST registration must not latch a boot/auth policy when
+    // no route was installed. A different valid config may then succeed.
+    dc_logtail_config_t failed = { .boot_id = "failed-first",
+                                   .allow_unauthenticated = true };
+    s_next_registration_error = ESP_FAIL;
+    expect_true("register: failed first route registration propagates error",
+                dc_logtail_register((httpd_handle_t)1, &failed) == ESP_FAIL &&
+                s_registrations == 0);
+    expect_true("register: failed first attempt did not publish a route",
+                s_route.handler == NULL);
+
     char boot[] = "boot-7f3a";
     dc_logtail_config_t cfg = { .boot_id = boot, .authorize = product_authorize };
     expect_true("register: valid config registers GET route",
@@ -264,6 +281,11 @@ static void test_registration(void)
     cfg.boot_id = "boot-7f3a";
     expect_true("register: identical config accepted again (server restart)",
                 dc_logtail_register((httpd_handle_t)2, &cfg) == ESP_OK);
+    // Once registration has succeeded, a later server-restart failure must
+    // preserve the original boot/auth policy rather than silently reset it.
+    s_next_registration_error = ESP_FAIL;
+    expect_true("register: failed restart propagates registration error",
+                dc_logtail_register((httpd_handle_t)3, &cfg) == ESP_FAIL);
     dc_logtail_config_t other = { .boot_id = "boot-other", .authorize = product_authorize };
     expect_true("register: different boot id mid-boot rejected",
                 dc_logtail_register((httpd_handle_t)1, &other) == ESP_ERR_INVALID_STATE);

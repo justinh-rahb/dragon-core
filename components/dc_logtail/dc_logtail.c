@@ -99,7 +99,8 @@ esp_err_t dc_logtail_register(httpd_handle_t server,
                                                        config->allow_unauthenticated);
     if (mode == DC_LOGTAIL_AUTH_INVALID) return ESP_ERR_INVALID_ARG;
 
-    if (s_state.latched) {
+    const bool was_latched = s_state.latched;
+    if (was_latched) {
         if (!same_config(config, mode)) return ESP_ERR_INVALID_STATE;
     } else {
         strcpy(s_state.boot_id, config->boot_id);   // length validated above
@@ -115,5 +116,11 @@ esp_err_t dc_logtail_register(httpd_handle_t server,
         .handler = logtail_get,
         .user_ctx = NULL,
     };
-    return httpd_register_uri_handler(server, &route);
+    esp_err_t err = httpd_register_uri_handler(server, &route);
+    if (err != ESP_OK && !was_latched) {
+        // No route was published. A failed first registration must not
+        // permanently lock the boot identity or authorization configuration.
+        memset(&s_state, 0, sizeof(s_state));
+    }
+    return err;
 }
