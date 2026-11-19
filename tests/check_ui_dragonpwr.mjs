@@ -28,6 +28,7 @@ function setup(){
     app:makeElement(),ventApp:makeElement(),statusApp:makeElement(),
     wheezeApp:makeElement(),pwrApp:elements["pwr-app"],pwrCaps:{},
     product:"dragonbreath",
+    fetch:()=>Promise.reject(Error("descriptor unavailable")),
     document:{title:"DragonBreath"},
     $:(id)=>{assert.ok(elements[id],"unknown DOM element: "+id);return elements[id];},
     u:(id,value)=>{if(elements[id])elements[id].textContent=value;},
@@ -107,6 +108,78 @@ const c2={outputs:{mains:true,usb1:false},restore:"off",meter:null,printer:null,
   c.applyPwr(c3);
   assert.equal(e["pwr-version"].textContent,"new-firmware");
   assert.equal(e["pwr-boot"].textContent,"new-boot");
+}
+
+// Reviewer P2: a successful incomplete state must not retain live outputs,
+// capability-gated links, or a Connected badge. The next valid state recovers.
+{
+  const {context:c,elements:e}=setup();
+  c.applyDeviceInfo({firmware:"test",boot_id:"boot-A",
+    ui:{schema:1,product:"dragonpwr"},capabilities:["power_switch","usb_switch"]});
+  c.applyPwr({...c2,boot_id:"boot-A"});
+  assert.equal(e["pwr-controls"].hidden,false);
+  for(const incomplete of [{outputs:{}},{heap:{free:1}}]){
+    c.applyPwr({...incomplete,boot_id:"boot-A"});
+    assert.equal(e["pwr-mains"].textContent,"Unavailable");
+    assert.equal(e["pwr-usb"].textContent,"Unavailable");
+    assert.equal(e["pwr-controls"].hidden,true);
+    assert.equal(e["pwr-conn"].textContent,"State incomplete");
+    assert.equal(e["pwr-app"].dataset.online,"0");
+    c.applyPwr({...c2,boot_id:"boot-A"});
+    assert.equal(e["pwr-mains"].textContent,"On");
+    assert.equal(e["pwr-controls"].hidden,false);
+  }
+}
+// Reviewer P2: a new boot must revoke the old descriptor immediately. Only
+// the matching new-boot descriptor can reenable logical state and /power.
+{
+  const {context:c,elements:e}=setup();
+  let resolveInfo;
+  const urls=[];
+  c.fetch=(url)=>{urls.push(url);return new Promise(resolve=>{resolveInfo=resolve;});};
+  c.applyDeviceInfo({firmware:"old",boot_id:"boot-A",
+    ui:{schema:1,product:"dragonpwr"},capabilities:["power_switch"]});
+  c.applyPwr({...c2,boot_id:"boot-A"});
+  assert.equal(e["pwr-mains"].textContent,"On");
+  c.applyPwr({...c2,boot_id:"boot-B"});
+  assert.equal(e["pwr-mains"].textContent,"Unavailable");
+  assert.equal(e["pwr-controls"].hidden,true);
+  assert.equal(e["pwr-cap"].textContent,"Switching unavailable");
+  assert.deepEqual(urls,["/api/v2/info"]);
+  resolveInfo({ok:true,json:()=>Promise.resolve({
+    boot_id:"boot-A",ui:{schema:1,product:"dragonpwr"},
+    capabilities:["power_switch"]})});
+  await new Promise(setImmediate);
+  assert.equal(e["pwr-controls"].hidden,true,"old-boot descriptor must be ignored");
+  c.pwrInfoRetryAt=0;
+  c.applyPwr({...c2,boot_id:"boot-B"});
+  assert.equal(urls.length,2);
+  resolveInfo({ok:true,json:()=>Promise.resolve({
+    firmware:"new",boot_id:"boot-B",ui:{schema:1,product:"dragonpwr"},
+    capabilities:["power_switch"]})});
+  await new Promise(setImmediate);
+  assert.equal(e["pwr-mains"].textContent,"On");
+  assert.equal(e["pwr-controls"].hidden,false);
+}
+// Reviewer P2: a failed initial info lookup is retried by subsequent state,
+// without fabricating capabilities before a matching descriptor is recovered.
+{
+  const {context:c,elements:e}=setup();
+  let count=0;
+  c.fetch=()=>Promise.resolve(++count===1
+    ? {ok:false}
+    : {ok:true,json:()=>Promise.resolve({firmware:"restored",boot_id:"boot-R",
+        ui:{schema:1,product:"dragonpwr"},capabilities:["power_switch"]})});
+  c.applyPwr({...c2,boot_id:"boot-R"});
+  assert.equal(e["pwr-controls"].hidden,true);
+  await new Promise(setImmediate);
+  assert.equal(count,1);
+  c.pwrInfoRetryAt=0; // advance simulated retry window without sleeping
+  c.applyPwr({...c2,boot_id:"boot-R"});
+  await new Promise(setImmediate);
+  assert.equal(count,2);
+  assert.equal(e["pwr-mains"].textContent,"On");
+  assert.equal(e["pwr-controls"].hidden,false);
 }
 
 // Product-specific shared view must not post power commands.

@@ -1486,6 +1486,9 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
   var statusApp = document.getElementById('ds-app');
   var pwrApp = document.getElementById('pwr-app');
   var pwrCaps={};
+  // Switching claims belong to a verified descriptor for the current boot.
+  var pwrBoot=null, pwrCapsBoot=null, pwrInfoVerified=false;
+  var pwrInfoPending=false, pwrInfoRetryAt=0, pwrLatest=null;
   var wheezeApp = document.getElementById('dw-app');
   var ventWasCalibrating = false;
   var product = 'dragonbreath';
@@ -1742,8 +1745,14 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     if(ui.schema!=null && ui.schema!==1) return;
     if(ui.product==='dragonpwr'){
       product='dragonpwr';app.hidden=true;ventApp.hidden=true;statusApp.hidden=true;wheezeApp.hidden=true;pwrApp.hidden=false;
+      // Ignore late descriptors from a previous boot. If state knows the boot,
+      // a descriptor without a matching boot ID cannot authorize switching.
+      if(pwrBoot!==null && i.boot_id!==pwrBoot) return;
       pwrCaps={};
-      if(Array.isArray(i.capabilities))i.capabilities.forEach(function(c){pwrCaps[c]=true});
+      pwrCapsBoot=typeof i.boot_id==='string'?i.boot_id:null;
+      pwrInfoVerified=Array.isArray(i.capabilities);
+      if(pwrInfoVerified)pwrInfoRetryAt=0;
+      if(pwrInfoVerified)i.capabilities.forEach(function(c){pwrCaps[c]=true});
       document.title=ui.display_name||'DragonPWR';
       u('pwr-version',i.firmware||'—');u('pwr-footer-version',i.firmware||'—');
       u('pwr-device',i.device_id||'—');u('pwr-boot',i.boot_id||'—');
@@ -2016,7 +2025,8 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
   }
 
 
-  /* DragonPWR must not reinterpret null/unavailable outputs as physical OFF. */
+  /* DragonPWR must not reinterpret null/unavailable outputs as physical OFF.
+     Never authorize switching using a descriptor from a previous boot. */
   function pwrSetConn(connected){
     pwrApp.dataset.online=connected?'1':'0';
     u('pwr-conn',connected?'Connected':'Reconnecting…');
@@ -2030,26 +2040,53 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     }
   }
   function pwrHeap(n){return typeof n==='number'&&isFinite(n)?Math.round(n/1024)+' KiB':'—';}
+  function pwrRequestInfo(){
+    if(pwrInfoVerified||pwrInfoPending||Date.now()<pwrInfoRetryAt) return;
+    pwrInfoPending=true;
+    pwrInfoRetryAt=Date.now()+5000; // bounded retry under SSE and polling
+    fetch('/api/v2/info',{cache:'no-store'})
+      .then(function(r){if(!r.ok)throw 0;return r.json();})
+      .then(function(i){
+        if(!i||!i.ui||i.ui.schema!==1||i.ui.product!=='dragonpwr')return;
+        applyDeviceInfo(i); // rejects a descriptor for an obsolete boot
+        if(pwrInfoVerified&&pwrLatest)applyPwr(pwrLatest);
+      }).catch(function(){})
+      .finally(function(){pwrInfoPending=false;});
+  }
   function applyPwr(s){
-    if(!s||!s.outputs||!Object.prototype.hasOwnProperty.call(s.outputs,'mains'))return;
-    // /api/v2/info may fail while state polling succeeds. Select the correct
-    // product surface from the state shape, but do not synthesize capabilities.
-    if(pwrApp.hidden)applyDeviceInfo({firmware:s.firmware,ui:{schema:1,product:'dragonpwr',display_name:'DragonPWR'}});
-    // State snapshots carry the current boot identity on DragonPWR.
-    // Refresh it even when the browser never observes a disconnect.
+    if(!s) return;
+    // State shape may identify DragonPWR when the initial info GET failed.
+    if(pwrApp.hidden&&s.outputs&&Object.prototype.hasOwnProperty.call(s.outputs,'mains'))
+      applyDeviceInfo({firmware:s.firmware,ui:{schema:1,product:'dragonpwr',display_name:'DragonPWR'}});
+    if(pwrApp.hidden) return;
+    pwrLatest=s;
+    if(typeof s.boot_id==='string'&&s.boot_id!==pwrBoot){
+      pwrBoot=s.boot_id;
+      if(pwrCapsBoot!==pwrBoot){
+        pwrCaps={};pwrCapsBoot=null;pwrInfoVerified=false;
+        u('pwr-cap','Switching unavailable');
+      }
+      // Force an immediate descriptor read for the newly observed boot.
+      pwrInfoRetryAt=0;
+    }
     if(typeof s.firmware==='string'){
       u('pwr-version',s.firmware);u('pwr-footer-version',s.firmware);
     }
     if(typeof s.device_id==='string')u('pwr-device',s.device_id);
     if(typeof s.boot_id==='string')u('pwr-boot',s.boot_id);
-    var a=s.outputs,m=!!pwrCaps.power_switch&&typeof a.mains==='boolean',
-      v=!!pwrCaps.usb_switch&&typeof a.usb1==='boolean';
+    var a=s.outputs;
+    var valid=a&&Object.prototype.hasOwnProperty.call(a,'mains')&&
+      Object.prototype.hasOwnProperty.call(a,'usb1');
+    var capsCurrent=pwrInfoVerified&&(pwrBoot===null||pwrCapsBoot===pwrBoot);
+    var m=!!valid&&capsCurrent&&!!pwrCaps.power_switch&&typeof a.mains==='boolean',
+      v=!!valid&&capsCurrent&&!!pwrCaps.usb_switch&&typeof a.usb1==='boolean';
     u('pwr-mains',m?(a.mains?'On':'Off'):'Unavailable');
     u('pwr-usb',v?(a.usb1?'On':'Off'):'Unavailable');
     $('pwr-mains').className='pwr-value'+(m?'':' pwr-unknown');
     $('pwr-usb').className='pwr-value'+(v?'':' pwr-unknown');
     $('pwr-controls').hidden=!(m||v);
-    u('pwr-note',m||v?'Reported logical states. Physical switching needs separate qualification.':
+    u('pwr-note',!valid?'Output snapshot incomplete. Last-known states are not live.':
+      m||v?'Reported logical states. Physical switching needs separate qualification.':
       'Output control unavailable. Physical output state has not been measured.');
     u('pwr-restore',typeof s.restore==='string'?s.restore:'Unavailable');
     var heap=s.heap||{};
@@ -2057,7 +2094,12 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     u('pwr-largest',pwrHeap(heap.largest_block));
     u('pwr-meter',s.meter==null?'Energy metering not available':'Meter telemetry available');
     u('pwr-printer',s.printer==null?'Printer observation not configured':'Printer observation available');
-    pwrSetConn(true);
+    pwrSetConn(!!valid);
+    if(!valid){
+      u('pwr-conn','State incomplete');
+      u('pwr-note','Output snapshot incomplete. Last-known states are not live.');
+    }
+    pwrRequestInfo();
   }
 
   /* ---- DragonVent adapter. DragonVent deliberately exposes a compact state
