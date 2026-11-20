@@ -6,7 +6,7 @@
 //
 // Wire contract (see README.md for the full description):
 //
-//   GET /api/v1/system/log?cursor=N
+//   GET /api/v1/system/console/tail?cursor=N
 //
 //   200  body == raw ring bytes in [start_seq, end_seq), byte-exact,
 //        Content-Type application/octet-stream; next cursor = end_seq

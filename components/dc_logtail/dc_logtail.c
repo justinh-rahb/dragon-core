@@ -41,11 +41,8 @@ static esp_err_t emit(httpd_req_t *req, const dc_logtail_response_t *resp,
             return httpd_resp_send(req, fail.body, (ssize_t)fail.body_len);
         }
     }
-    // Best effort: the eight contract headers exactly fill ESP-IDF's default
-    // max_resp_headers (8). Servers configured with more slots also get
-    // no-store; at the default this fails silently and changes nothing else.
-    (void)httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-
+    // Cache-Control is mandatory on 200 and 409 and is included in the
+    // response plan above. Missing it fails closed like missing metadata.
     const char *body = resp->body != NULL ? resp->body : payload;
     return httpd_resp_send(req, body, (ssize_t)resp->body_len);
 }

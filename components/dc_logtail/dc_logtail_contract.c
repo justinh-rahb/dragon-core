@@ -135,13 +135,14 @@ void dc_logtail_build_read_response(dc_evlog_console_read_status_t status,
         out->body = NULL;
         out->body_len = info->len;
         add_text(out, DC_LOGTAIL_HDR_BOOT_ID, boot_id);
-        add_u64(out, DC_LOGTAIL_HDR_CURSOR, info->cursor);
+        // Client knows the requested cursor; free a slot for no-store.
         add_u64(out, DC_LOGTAIL_HDR_OLDEST, info->oldest_seq);
         add_u64(out, DC_LOGTAIL_HDR_START, info->start_seq);
         add_u64(out, DC_LOGTAIL_HDR_END, info->end_seq);
         add_u64(out, DC_LOGTAIL_HDR_WRITE, info->write_seq);
         add_u64(out, DC_LOGTAIL_HDR_LOST, info->lost_bytes);
         add_u64(out, DC_LOGTAIL_HDR_CAPACITY, (uint64_t)info->capacity);
+        add_text(out, "Cache-Control", "no-store");
         return;
     case DC_EVLOG_CONSOLE_READ_FUTURE_CURSOR:
         set_error_body(out, "409 Conflict", BODY_FUTURE, sizeof(BODY_FUTURE) - 1);
@@ -150,6 +151,7 @@ void dc_logtail_build_read_response(dc_evlog_console_read_status_t status,
         add_u64(out, DC_LOGTAIL_HDR_OLDEST, info->oldest_seq);
         add_u64(out, DC_LOGTAIL_HDR_WRITE, info->write_seq);
         add_u64(out, DC_LOGTAIL_HDR_CAPACITY, (uint64_t)info->capacity);
+        add_text(out, "Cache-Control", "no-store");
         return;
     default:
         set_error_body(out, "500 Internal Server Error", BODY_INTERNAL,

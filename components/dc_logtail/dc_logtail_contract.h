@@ -77,8 +77,10 @@ typedef enum {
 } dc_logtail_error_t;
 
 // Response for a completed dc_evlog_console_read(). `boot_id` must outlive
-// the response. OK -> 200 with all eight metadata headers; FUTURE_CURSOR ->
-// 409 with boot id, cursor, oldest, write and capacity; anything else -> 500.
+// the response. OK -> 200 with seven evidence headers plus mandatory no-store
+// (the client knows the requested cursor; it is not echoed on 200).
+// FUTURE_CURSOR -> 409 with boot id, cursor, oldest, write, capacity and
+// mandatory no-store; anything else -> 500.
 void dc_logtail_build_read_response(dc_evlog_console_read_status_t status,
                                     const dc_evlog_console_read_t *info,
                                     const char *boot_id,

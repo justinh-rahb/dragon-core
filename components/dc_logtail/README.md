@@ -37,7 +37,7 @@ after an HTTP server restart must pass an identical configuration.
 ## Request
 
 ```
-GET /api/v1/system/log?cursor=N
+GET /api/v1/system/console/tail?cursor=N
 ```
 
 `N` is an absolute byte sequence number for the current boot, written as
@@ -85,13 +85,14 @@ raw bytes retained.
 | Header                  | `200` | `409` | Meaning                                  |
 | ----------------------- | :---: | :---: | ---------------------------------------- |
 | `Dragon-Log-Boot-Id`    |   ✓   |   ✓   | product-supplied boot/session identity   |
-| `Dragon-Log-Cursor`     |   ✓   |   ✓   | requested cursor, echoed                 |
+| `Dragon-Log-Cursor`     |       |   ✓   | echoed on 409; on 200 use request cursor |
 | `Dragon-Log-Oldest-Seq` |   ✓   |   ✓   | oldest retained byte at the read         |
 | `Dragon-Log-Start-Seq`  |   ✓   |       | first returned byte                      |
 | `Dragon-Log-End-Seq`    |   ✓   |       | one past the last returned byte          |
 | `Dragon-Log-Write-Seq`  |   ✓   |   ✓   | producer position observed by the read   |
 | `Dragon-Log-Lost-Bytes` |   ✓   |       | `start_seq - cursor`                     |
 | `Dragon-Log-Capacity`   |   ✓   |   ✓   | console ring capacity in bytes           |
+| `Cache-Control: no-store` |   ✓   |   ✓   | prevents caching cursor responses       |
 
 All sequence values are unsigned 64-bit decimal. Every `200` value is taken from
 the same atomic read as the payload.
@@ -110,8 +111,13 @@ conflicts with current device state; its metadata lets a client resynchronise
 without a second request. Clients must ignore `Dragon-Log-*` headers on any
 status other than `200` and `409`.
 
-The eight `200` headers exactly fill ESP-IDF's default `max_resp_headers` (8).
-`Cache-Control: no-store` is added only when the server has a spare slot.
+Seven `200` evidence headers plus mandatory `Cache-Control: no-store` fit
+ESP-IDF's default `max_resp_headers` (8). The request cursor is not echoed on
+success because the client supplied it; it can also be derived from
+`start_seq - lost_bytes`. A `409` still echoes its rejected cursor and carries
+mandatory `no-store` (six response-header slots). If the HTTP server cannot
+stage every required header, the handler fails closed with `500`. Clients
+must ignore partially staged evidence headers on `500`.
 
 ## Reboot semantics
 

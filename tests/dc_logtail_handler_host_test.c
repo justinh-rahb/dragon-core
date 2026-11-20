@@ -6,7 +6,7 @@
 //
 // Invariant under test: a 200 or 409 is never transmitted with incomplete
 // evidence metadata, for every max_resp_headers value, and the optional
-// Cache-Control header can never displace a required one.
+// Cache-Control: no-store is mandatory on 200 and 409.
 
 #include "dc_evlog.h"
 #include "dc_logtail.h"
@@ -175,7 +175,7 @@ static void expect_true(const char *name, bool condition)
 }
 
 static const char *const REQUIRED_200[] = {
-    "Dragon-Log-Boot-Id", "Dragon-Log-Cursor", "Dragon-Log-Oldest-Seq",
+    "Dragon-Log-Boot-Id", "Dragon-Log-Oldest-Seq",
     "Dragon-Log-Start-Seq", "Dragon-Log-End-Seq", "Dragon-Log-Write-Seq",
     "Dragon-Log-Lost-Bytes", "Dragon-Log-Capacity",
 };
@@ -240,8 +240,13 @@ static httpd_req_t *run(const char *query, bool auth_ok, size_t max_hdrs)
 // The core invariant, checked on every transmitted response.
 static bool evidence_complete_or_not_nominal(const httpd_req_t *r)
 {
-    if (is_status(r, "200")) return has_all(r, REQUIRED_200, N_ELEMS(REQUIRED_200));
-    if (is_status(r, "409")) return has_all(r, REQUIRED_409, N_ELEMS(REQUIRED_409));
+    if (is_status(r, "200")) return has_all(r, REQUIRED_200, N_ELEMS(REQUIRED_200)) &&
+        wire_hdr(r, "Dragon-Log-Cursor") == NULL &&
+        wire_hdr(r, "Cache-Control") != NULL &&
+        strcmp(wire_hdr(r, "Cache-Control"), "no-store") == 0;
+    if (is_status(r, "409")) return has_all(r, REQUIRED_409, N_ELEMS(REQUIRED_409)) &&
+        wire_hdr(r, "Cache-Control") != NULL &&
+        strcmp(wire_hdr(r, "Cache-Control"), "no-store") == 0;
     return true;
 }
 
@@ -276,7 +281,8 @@ static void test_registration(void)
     expect_true("register: valid config registers GET route",
                 dc_logtail_register((httpd_handle_t)1, &cfg) == ESP_OK &&
                 s_registrations == 1 && s_route.method == HTTP_GET &&
-                strcmp(s_route.uri, "/api/v1/system/log") == 0);
+                strcmp(s_route.uri, DC_LOGTAIL_URI) == 0 &&
+                strcmp(s_route.uri, "/api/v1/system/console/tail") == 0);
     boot[0] = 'X';   // caller storage changes after registration
     cfg.boot_id = "boot-7f3a";
     expect_true("register: identical config accepted again (server restart)",
@@ -314,9 +320,11 @@ static void test_default_slots_complete_200(void)
     expect_true("max_resp_headers=8: single send, 200, octet-stream",
                 r->send_calls == 1 && is_status(r, "200") &&
                 strcmp(r->wire_type, "application/octet-stream") == 0);
-    expect_true("max_resp_headers=8: all eight evidence headers, nothing else",
-                r->wire_hdr_count == 8 && has_all(r, REQUIRED_200, 8) &&
-                wire_hdr(r, "Cache-Control") == NULL);
+    expect_true("max_resp_headers=8: seven evidence headers and mandatory no-store",
+                r->wire_hdr_count == 8 && has_all(r, REQUIRED_200, 7) &&
+                wire_hdr(r, "Dragon-Log-Cursor") == NULL &&
+                wire_hdr(r, "Cache-Control") != NULL &&
+                strcmp(wire_hdr(r, "Cache-Control"), "no-store") == 0);
     expect_true("max_resp_headers=8: boot id is the latched copy",
                 strcmp(wire_hdr(r, "Dragon-Log-Boot-Id"), "boot-7f3a") == 0);
     expect_true("max_resp_headers=8: metadata matches body byte-exactly",
@@ -326,16 +334,18 @@ static void test_default_slots_complete_200(void)
     free(r);
 }
 
-static void test_spare_slot_adds_cache_control_last(void)
+static void test_spare_slot_keeps_mandatory_no_store(void)
 {
     httpd_req_t *r = run("cursor=0", true, 9);
-    expect_true("max_resp_headers=9: 200 with eight evidence headers first",
-                is_status(r, "200") && r->wire_hdr_count == 9 && has_all(r, REQUIRED_200, 8));
+    expect_true("max_resp_headers=9: still seven evidence headers and no-store",
+                is_status(r, "200") && r->wire_hdr_count == 8 &&
+                has_all(r, REQUIRED_200, 7));
     bool order = true;
-    for (size_t i = 0; i < 8; ++i) order &= strncmp(r->wire_field[i], "Dragon-Log-", 11) == 0;
-    expect_true("max_resp_headers=9: optional Cache-Control only in the spare slot",
-                order && strcmp(r->wire_field[8], "Cache-Control") == 0 &&
-                strcmp(r->wire_value[8], "no-store") == 0);
+    for (size_t i = 0; i < 7; ++i)
+        order &= strncmp(r->wire_field[i], "Dragon-Log-", 11) == 0;
+    expect_true("max_resp_headers=9: mandatory no-store follows evidence",
+                order && strcmp(r->wire_field[7], "Cache-Control") == 0 &&
+                strcmp(r->wire_value[7], "no-store") == 0);
     free(r);
 }
 
@@ -371,12 +381,18 @@ static void test_future_cursor_slots(void)
                 r->send_calls == 1 && is_status(r, "409") &&
                 evidence_hdr_count(r) == 5 && has_all(r, REQUIRED_409, 5) &&
                 strcmp(r->wire_type, "application/json") == 0);
-    expect_true("409 at max_resp_headers=8: optional Cache-Control only after evidence",
-                first_five && strcmp(r->wire_field[5], "Cache-Control") == 0);
+    expect_true("409 at max_resp_headers=8: mandatory no-store follows evidence",
+                first_five && strcmp(r->wire_field[5], "Cache-Control") == 0 &&
+                strcmp(r->wire_value[5], "no-store") == 0);
     free(r);
     r = run(q, true, 5);
-    expect_true("409 at max_resp_headers=5: still complete",
-                is_status(r, "409") && has_all(r, REQUIRED_409, 5));
+    expect_true("409 at max_resp_headers=5: missing no-store fails closed",
+                is_status(r, "500") && evidence_hdr_count(r) == 5);
+    free(r);
+    r = run(q, true, 6);
+    expect_true("409 at max_resp_headers=6: complete with no-store",
+                is_status(r, "409") && has_all(r, REQUIRED_409, 5) &&
+                strcmp(wire_hdr(r, "Cache-Control"), "no-store") == 0);
     free(r);
     bool all_ok = true;
     for (size_t k = 0; k < 5; ++k) {
@@ -439,7 +455,7 @@ int main(void)
     dc_evlog_console_init();
     test_registration();
     test_default_slots_complete_200();
-    test_spare_slot_adds_cache_control_last();
+    test_spare_slot_keeps_mandatory_no_store();
     test_insufficient_slots_fail_closed();
     test_future_cursor_slots();
     test_rejections_need_no_slots();

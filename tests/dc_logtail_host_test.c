@@ -98,13 +98,15 @@ static bool header_u64(const dc_logtail_response_t *r, const char *name, uint64_
     return v != NULL && dc_logtail_parse_u64(v, strlen(v), &got) && got == expected;
 }
 
-// Every 200 must carry all eight headers, each equal to the read it came from.
+// Every 200 carries seven evidence headers plus mandatory no-store.
 static bool ok_headers_match(const dc_logtail_response_t *r,
                              const dc_evlog_console_read_t *info, const char *boot)
 {
     const char *b = header(r, DC_LOGTAIL_HDR_BOOT_ID);
     return r->header_count == 8 && b != NULL && strcmp(b, boot) == 0 &&
-           header_u64(r, DC_LOGTAIL_HDR_CURSOR, info->cursor) &&
+           header(r, DC_LOGTAIL_HDR_CURSOR) == NULL &&
+           header(r, "Cache-Control") != NULL &&
+           strcmp(header(r, "Cache-Control"), "no-store") == 0 &&
            header_u64(r, DC_LOGTAIL_HDR_OLDEST, info->oldest_seq) &&
            header_u64(r, DC_LOGTAIL_HDR_START, info->start_seq) &&
            header_u64(r, DC_LOGTAIL_HDR_END, info->end_seq) &&
@@ -364,7 +366,9 @@ static void test_future_cursor_response(void)
                 strcmp(r.content_type, "application/json") == 0 &&
                 r.body != NULL && r.body_len == strlen(r.body));
     expect_true("future cursor: resync metadata present, no range headers",
-                r.header_count == 5 &&
+                r.header_count == 6 &&
+                header(&r, "Cache-Control") != NULL &&
+                strcmp(header(&r, "Cache-Control"), "no-store") == 0 &&
                 header_u64(&r, DC_LOGTAIL_HDR_CURSOR, future) &&
                 header_u64(&r, DC_LOGTAIL_HDR_WRITE, s_produced) &&
                 header_u64(&r, DC_LOGTAIL_HDR_OLDEST, s_produced - DC_EVLOG_CONSOLE_BYTES) &&
@@ -398,7 +402,7 @@ static void test_headers_cover_full_u64_range(void)
         for (size_t j = i + 1; j < r.header_count; ++j)
             distinct &= strcmp(r.headers[i].name, r.headers[j].name) != 0;
     expect_true("header names are distinct", distinct);
-    expect_true("200 uses exactly ESP-IDF's default 8 response-header slots",
+    expect_true("200 fits evidence and mandatory no-store in eight slots",
                 r.header_count == DC_LOGTAIL_MAX_HEADERS && DC_LOGTAIL_MAX_HEADERS == 8);
 }
 
