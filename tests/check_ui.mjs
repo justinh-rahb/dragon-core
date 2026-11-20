@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import "./check_ui_manual_stop.mjs";
 import "./check_ui_dragonpwr.mjs";
+import "./check_ui_product_startup.mjs";
 
 // The family dashboard/control UI is an embedded SPA, not a C string.
 const html = fs.readFileSync(
@@ -31,7 +32,7 @@ for (const marker of [
   'data-capability="drying"',
   "function applyDeviceInfo(i)",
   "if(ui.schema!=null && ui.schema!==1) return",
-  "(title&&title.textContent)||document.title",
+  "(title&&title.textContent)||'DragonBreath'",
   'ui.product===\'dragonvent\'',
   'id="dv-app"',
   'data-vent-content="manual"',
