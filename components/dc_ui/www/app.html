@@ -689,7 +689,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
   <symbol id="i-vent" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 3c2.8 2.8 3.3 5.1 1.5 7.1M21 12c-2.8 2.8-5.1 3.3-7.1 1.5M12 21c-2.8-2.8-3.3-5.1-1.5-7.1M3 12c2.8-2.8 5.1-3.3 7.1-1.5"/><circle cx="12" cy="12" r="1.5"/></symbol>
 </svg>
 
-<div class="app" data-state="off" data-online="0">
+<div class="app" data-state="off" data-online="0" hidden>
   <div class="shell">
     <nav class="rail" aria-label="Primary navigation">
       <!-- Connection status dot, pinned to the top of the rail. Text is aria/tooltip
@@ -1468,7 +1468,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     </article>
     <div id="dc-product-setup"></div>
     <article class="provision-card" id="dc-token-card" hidden><h3>Control token</h3>
-      <p class="set-note is-warn">A control token locks every command to clients that send it. If you set one, this browser remembers it — but Klipper/Moonraker and any other device must be given the same token or they can no longer control the heater. Clear it to return to open LAN control.</p>
+      <p class="set-note is-warn">A control token restricts device commands to clients that provide it. This browser remembers the token, but any other controllers or integrations must be configured with the same token. Clear it to return to open LAN control.</p>
       <div class="provision-field"><label for="s-token">Token</label><input class="form-input" id="s-token" type="text" maxlength="64" placeholder="Enter a token, or leave blank" autocomplete="off" spellcheck="false"></div>
       <div class="provision-actions"><button class="btn btn-primary" type="button" id="s-token-save"><span>Set token</span></button><button class="btn btn-danger" type="button" id="s-token-clear"><span>Clear token</span></button></div>
       <div class="mode-feedback" id="s-token-msg" role="status" aria-live="polite"></div>
@@ -1795,8 +1795,12 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
       u('dw-footer-version', i.firmware||'—');
       return;
     }
+    // Only reveal the heater UI for DragonBreath or a legacy descriptor.
+    // Unknown product descriptors must never briefly expose heater controls.
+    if(ui.product && ui.product!=='dragonbreath') return;
+    app.hidden=false;
     var title=$('dc-product-title');
-    var name=ui.display_name||i.display_name||(title&&title.textContent)||document.title;
+    var name=ui.display_name||i.display_name||(title&&title.textContent)||'DragonBreath';
     document.title=name;
     u('dc-product-title', name);
     if(!Array.isArray(i.capabilities)) return;
@@ -2449,6 +2453,8 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     if(s && s.vent){ applyVent(s); return; }
     if(s && s.printer && s.wifi && s.lighting){ applyStatus(s); return; }
     if(!s || s.api_version!==2) return;
+    // Legacy DragonBreath can identify itself through its state payload.
+    if(s.sensors&&s.control&&s.heater) app.hidden=false;
     if(last && s.boot_id===last.boot_id && s.state_revision<rev) return;
     if(last && s.boot_id!==last.boot_id) lease=null;   // device rebooted -> our lease is gone
     last=s; rev=s.state_revision;
@@ -2630,6 +2636,9 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
       .finally(function(){ polling=false; setTimeout(poll, pollDelay+Math.random()*250); });
   }
   function events(){
+    // DragonPWR exposes polling only; a missing SSE route otherwise falls
+    // through the product portal's SPA catch-all and returns compressed HTML.
+    if(product==='dragonpwr'){poll();return;}
     var es=new EventSource('/api/v2/events'), seen=false;
     function ev(e){ seen=true; try{ apply(JSON.parse(e.data)); }catch(_){} }
     es.addEventListener('state', ev);
@@ -3168,7 +3177,7 @@ svg.icon{ width: 20px; height: 20px; fill: none; stroke: currentColor;
     if(t.length>64){ flash('s-token-msg', 'Token must be 64 characters or fewer.', 'is-error'); return; }
     var warn = clear
       ? 'Clear the control token and return to open LAN control?'
-      : 'Set this control token? Klipper/Moonraker and every other controller must send the same token or they can no longer control the heater.';
+      : 'Set this control token? Other controllers and integrations must be configured to send the same token or their commands will be refused.';
     if(!confirm(warn)) return;
     flash('s-token-msg', 'Saving…');
     request('/api/v2/token', {token:t}).then(function(r){
